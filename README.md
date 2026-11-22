@@ -20,10 +20,13 @@ A self-hosted web application inspired by **LanScan**, built to discover, invent
 - **Full Data Table & Inspector Panel (`Details`):**
   - Sortable, searchable columns: `IPv4`, `MAC`, `Hostname`, `Ping`, `Vendor`, `Identification`, `DNS Name`, `mDNS Name`, `SMB Name`, `SMB Domain`, `Ports`, and `Network`.
   - **Complete Device Editing:** customize and persist hostname, locked device category, vendor, model/identification, physical location, admin URL, local access credentials, and notes.
-- **Interactive SVG Network Topology Diagram:**
-  - Visualizes **Internet / WAN → Routers / Gateways → Subnets → Connected Devices** with vector category icons (Router, NAS, Smart TV, Camera/DVR, Printer, Console, IoT, Streaming, PC/Mobile).
+- **Interactive Illustrated SVG Network Topology Diagram:**
+  - Visualizes **Internet / WAN → Routers / Gateways → Subnets → Connected Devices** with detailed multi-tone vector device drawings (Router, 4-bay NAS, Smart TV, IP Camera, Printer, Console, IoT Smart Bulb, Streaming Stick, Laptop, Smartphone).
   - Automatic detection of **cascaded routers** via WAN/LAN MAC matching.
   - Pan, zoom (mouse wheel & buttons), fit-to-screen, subnet/search filtering, and click-to-inspect any node.
+- **Automated Network Architecture Audit & Recommendations:**
+  - Computes a live **Network Health Score (0–100)** across **Topology**, **Security**, **Performance**, and **Organization**.
+  - Automatically detects **Double NAT / fragmented subnets**, **multi-homed NAS devices**, **unsegmented IoT & cameras**, **insecure open ports** (FTP, Telnet, RTSP, exposed DBs, HTTP admin), and generates a tailored **DHCP IP Reservation Plan**.
 - **Brand & Protocol Enrichment Engine:**
   - Local IEEE OUI database (`nmap-mac-prefixes`) + automatic online OUI lookup fallback cached in SQLite (`maclookup.app`).
   - Active protocol fingerprinting: **Samsung SmartTV API** (`:8001` with screen size, series, and Tizen parsing), **QNAP QTS** metadata, HTTP headers/titles/realms, **TLS** certificates, and **SNMP `sysDescr`** (`UDP 161`).
@@ -126,6 +129,7 @@ With `network_mode: host`, the container gains **native Layer-2 ARP, SSDP, and m
 | `POST` | `/api/scan/start` | Start scanning all enabled subnets or specific `subnet_ids` |
 | `POST` | `/api/scan/stop` | Stop an active scan |
 | `GET` | `/api/topology` | Return multi-subnet graph with gateways, cascaded links, and devices |
+| `GET` | `/api/recommendations` | Run automated network architecture & security audit with Health Score |
 | `PATCH` | `/api/devices/{ipv4}` | Save edited device details (hostname, type, location, credentials, notes) |
 | `POST` | `/api/devices/{ipv4}/port-scan` | Run TCP port scan (`quick`, `common`, `full`, `custom`) |
 | `POST` | `/api/devices/{ipv4}/enrich` | Run deep enrichment (protocols, TLS, SNMP, online OUI lookup) |

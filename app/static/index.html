@@ -92,6 +92,7 @@
         <div class="view-tabs" role="tablist" focusgroup="tablist nomemory" aria-label="Vista principal">
           <button type="button" role="tab" id="tab-table" aria-selected="true" focusgroupstart>Tabla</button>
           <button type="button" role="tab" id="tab-diagram" aria-selected="false">Diagrama de Red</button>
+          <button type="button" role="tab" id="tab-audit" aria-selected="false">Auditoría y Mejoras</button>
         </div>
         <div class="subnet-pills" id="subnet-pills" role="group" aria-label="Filtrar por red"></div>
       </div>
@@ -206,7 +207,63 @@
               </div>
             </div>
             <div class="diagram-canvas-wrap" id="diagram-canvas-wrap">
-              <svg id="topology-svg" class="topology-svg" role="img" aria-label="Diagrama topológico de equipos conectados en las redes de casa"></svg>
+              <svg id="topology-svg" class="topology-svg" role="img" aria-label="Diagrama topológico ilustrado de equipos conectados en las redes de casa"></svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab Panel 3: Automated Network Architecture Audit & Recommendations -->
+        <div id="panel-audit" class="view-panel" role="tabpanel" aria-labelledby="tab-audit" hidden>
+          <div class="audit-pane">
+            <div class="audit-header">
+              <div class="audit-hero">
+                <div class="score-ring-wrap">
+                  <svg viewBox="0 0 100 100" class="score-ring" aria-hidden="true">
+                    <circle class="score-ring-track" cx="50" cy="50" r="42" />
+                    <circle id="audit-score-arc" class="score-ring-fill" cx="50" cy="50" r="42" stroke-dasharray="263.9" stroke-dashoffset="263.9" />
+                  </svg>
+                  <div class="score-ring-text">
+                    <span id="audit-overall-score" class="score-number">—</span>
+                    <span class="score-caption">Salud</span>
+                  </div>
+                </div>
+                <div class="audit-hero-meta">
+                  <div class="audit-title-row">
+                    <h2>Auditoría de Arquitectura de Red</h2>
+                    <button type="button" id="btn-refresh-audit" class="secondary-btn">Re-analizar</button>
+                  </div>
+                  <p id="audit-subtitle" class="help-text">Analiza automáticamente topología, Doble NAT, segmentación IoT, puertos inseguros y rendimiento.</p>
+                  <div class="subscore-grid" id="audit-subscores"></div>
+                </div>
+              </div>
+              <div class="audit-filter-row" id="audit-cat-filters" role="group" aria-label="Filtrar recomendaciones por categoría">
+                <button type="button" class="pill-btn" data-audit-cat="all" aria-pressed="true">Todas</button>
+                <button type="button" class="pill-btn" data-audit-cat="topology" aria-pressed="false">Topología</button>
+                <button type="button" class="pill-btn" data-audit-cat="security" aria-pressed="false">Seguridad</button>
+                <button type="button" class="pill-btn" data-audit-cat="performance" aria-pressed="false">Rendimiento</button>
+                <button type="button" class="pill-btn" data-audit-cat="organization" aria-pressed="false">Organización</button>
+              </div>
+            </div>
+
+            <div class="audit-body">
+              <div id="audit-findings" class="findings-list"></div>
+
+              <section class="ip-plan-section" id="audit-ip-plan-section" hidden>
+                <h3>Plan sugerido de direccionamiento IP (Reservas DHCP)</h3>
+                <p class="help-text">Organizar tus equipos por rangos fijos en el DHCP del router principal facilita el diagnóstico, firewall y mantenimiento.</p>
+                <div class="ip-plan-wrap">
+                  <table class="ip-plan-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Rango IP</th>
+                        <th scope="col">Rol / Grupo</th>
+                        <th scope="col">Equipos sugeridos</th>
+                      </tr>
+                    </thead>
+                    <tbody id="audit-ip-plan-body"></tbody>
+                  </table>
+                </div>
+              </section>
             </div>
           </div>
         </div>

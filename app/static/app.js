@@ -370,6 +370,7 @@
     updateCountersAndEmpty();
     if (state.selectedIp === dev.ipv4) renderDetails(dev);
     if (state.activeView === "diagram") scheduleDiagramRender();
+    if (state.activeView === "audit") scheduleAuditRender();
   }
 
   function refreshVisibility() {
@@ -1031,10 +1032,120 @@
       selectDevice(null);
     }
     if (state.activeView === "diagram") scheduleDiagramRender();
+    if (state.activeView === "audit") scheduleAuditRender();
   }
 
   // =========================================================================
-  // Device Category Vector Icons (inline SVG paths)
+  // Detailed Multi-Tone Illustrated Device Drawings (48x48 SVG artwork)
+  // =========================================================================
+  const DEVICE_DRAWINGS = {
+    internet: `
+      <circle cx="24" cy="24" r="17" fill="#0ea5e9" fill-opacity="0.16" stroke="#0284c7" stroke-width="2"/>
+      <ellipse cx="24" cy="24" rx="8.5" ry="17" fill="none" stroke="#0284c7" stroke-width="1.6"/>
+      <path d="M8 18h32M8 30h32" stroke="#0284c7" stroke-width="1.5"/>
+      <circle cx="24" cy="18" r="2.2" fill="#38bdf8"/>
+      <circle cx="17" cy="30" r="2.2" fill="#22c55e"/>
+      <circle cx="31" cy="24" r="2.2" fill="#6366f1"/>
+    `,
+    router: `
+      <path d="M13 24L10 9M35 24L38 9" stroke="#64748b" stroke-width="2.4" stroke-linecap="round"/>
+      <circle cx="10" cy="8.5" r="2" fill="#3b82f6"/>
+      <circle cx="38" cy="8.5" r="2" fill="#3b82f6"/>
+      <path d="M17.5 14.5a9 9 0 0 1 13 0M20.5 18a5 5 0 0 1 7 0" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>
+      <rect x="6" y="24" width="36" height="14" rx="4" fill="#334155" stroke="#1e293b" stroke-width="1.5"/>
+      <rect x="8" y="26" width="32" height="3.5" rx="1.5" fill="#475569"/>
+      <circle cx="13" cy="33" r="2" fill="#22c55e"/>
+      <circle cx="19" cy="33" r="2" fill="#22c55e"/>
+      <circle cx="25" cy="33" r="2" fill="#38bdf8"/>
+      <rect x="31" y="31.5" width="7" height="3" rx="1" fill="#94a3b8"/>
+    `,
+    nas: `
+      <rect x="8" y="6" width="32" height="36" rx="4" fill="#1e293b" stroke="#475569" stroke-width="1.5"/>
+      <rect x="11" y="10" width="5.5" height="24" rx="1.2" fill="#334155" stroke="#64748b" stroke-width="0.9"/>
+      <rect x="18" y="10" width="5.5" height="24" rx="1.2" fill="#334155" stroke="#64748b" stroke-width="0.9"/>
+      <rect x="25" y="10" width="5.5" height="24" rx="1.2" fill="#334155" stroke="#64748b" stroke-width="0.9"/>
+      <rect x="32" y="10" width="5.5" height="24" rx="1.2" fill="#334155" stroke="#64748b" stroke-width="0.9"/>
+      <circle cx="13.7" cy="13.5" r="1.2" fill="#22c55e"/>
+      <circle cx="20.7" cy="13.5" r="1.2" fill="#22c55e"/>
+      <circle cx="27.7" cy="13.5" r="1.2" fill="#22c55e"/>
+      <circle cx="34.7" cy="13.5" r="1.2" fill="#38bdf8"/>
+      <rect x="12" y="36.8" width="10" height="2.4" rx="1.2" fill="#0ea5e9"/>
+      <circle cx="35" cy="38" r="1.6" fill="#22c55e"/>
+    `,
+    tv: `
+      <rect x="5" y="8" width="38" height="25" rx="3" fill="#0f172a" stroke="#475569" stroke-width="1.8"/>
+      <rect x="7.5" y="10.5" width="33" height="20" rx="1.5" fill="#1d4ed8"/>
+      <polygon points="7.5,10.5 27,10.5 16,30.5 7.5,30.5" fill="#38bdf8" fill-opacity="0.32"/>
+      <polygon points="27,10.5 40.5,10.5 40.5,30.5 16,30.5" fill="#7c3aed" fill-opacity="0.3"/>
+      <rect x="21" y="33" width="6" height="4.5" fill="#64748b"/>
+      <rect x="14" y="37.5" width="20" height="2.6" rx="1.3" fill="#475569"/>
+      <circle cx="38" cy="31.5" r="1" fill="#22c55e"/>
+    `,
+    camera: `
+      <path d="M10 38v-8h6" fill="none" stroke="#64748b" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="11" y="14" width="24" height="16" rx="4" fill="#f8fafc" stroke="#475569" stroke-width="1.8"/>
+      <path d="M35 17l7-3.5v17L35 27z" fill="#cbd5e1" stroke="#475569" stroke-width="1.5" stroke-linejoin="round"/>
+      <circle cx="22" cy="22" r="5.5" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+      <circle cx="22" cy="22" r="2.6" fill="#0ea5e9"/>
+      <circle cx="20.5" cy="20.5" r="1" fill="#ffffff"/>
+      <circle cx="30.5" cy="17.5" r="1.5" fill="#ef4444"/>
+    `,
+    printer: `
+      <rect x="13" y="6" width="22" height="12" rx="1.5" fill="#f8fafc" stroke="#64748b" stroke-width="1.5"/>
+      <path d="M17 10h14M17 13.5h10" stroke="#94a3b8" stroke-width="1.4" stroke-linecap="round"/>
+      <rect x="6" y="16" width="36" height="16" rx="3.5" fill="#475569" stroke="#334155" stroke-width="1.5"/>
+      <circle cx="36" cy="21" r="1.8" fill="#38bdf8"/>
+      <circle cx="31" cy="21" r="1.4" fill="#22c55e"/>
+      <rect x="12" y="27" width="24" height="13" rx="1.5" fill="#ffffff" stroke="#64748b" stroke-width="1.5"/>
+      <path d="M16 31.5h16M16 35.5h11" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round"/>
+    `,
+    computer: `
+      <rect x="8" y="9" width="32" height="22" rx="2.5" fill="#0f172a" stroke="#64748b" stroke-width="1.8"/>
+      <rect x="10.5" y="11.5" width="27" height="17" rx="1" fill="#2563eb"/>
+      <polygon points="10.5,11.5 28,11.5 19,28.5 10.5,28.5" fill="#60a5fa" fill-opacity="0.38"/>
+      <path d="M4 32.5h40l-2.5 5a2 2 0 0 1-1.8 1H8.3a2 2 0 0 1-1.8-1L4 32.5z" fill="#cbd5e1" stroke="#64748b" stroke-width="1.4"/>
+      <rect x="20" y="34" width="8" height="1.8" rx="0.9" fill="#64748b"/>
+    `,
+    mobile: `
+      <rect x="14" y="5" width="20" height="38" rx="4.5" fill="#1e293b" stroke="#64748b" stroke-width="1.8"/>
+      <rect x="16.5" y="8.5" width="15" height="30" rx="2" fill="#0ea5e9"/>
+      <polygon points="16.5,8.5 31.5,8.5 31.5,24 16.5,32" fill="#6366f1" fill-opacity="0.45"/>
+      <rect x="21" y="9.8" width="6" height="1.6" rx="0.8" fill="#0f172a"/>
+      <rect x="20.5" y="35.8" width="7" height="1.5" rx="0.75" fill="#ffffff" fill-opacity="0.8"/>
+    `,
+    iot: `
+      <path d="M15 11a13 13 0 0 1 18 0M18.5 14.5a8 8 0 0 1 11 0" fill="none" stroke="#38bdf8" stroke-width="1.8" stroke-linecap="round"/>
+      <circle cx="24" cy="25" r="9.5" fill="#fbbf24" fill-opacity="0.28" stroke="#f59e0b" stroke-width="2"/>
+      <circle cx="24" cy="25" r="5" fill="#f59e0b"/>
+      <rect x="20" y="34.5" width="8" height="5" rx="1.5" fill="#64748b"/>
+      <path d="M21 41h6" stroke="#475569" stroke-width="2" stroke-linecap="round"/>
+    `,
+    media_player: `
+      <rect x="6" y="13" width="36" height="22" rx="5" fill="#1e293b" stroke="#475569" stroke-width="1.8"/>
+      <circle cx="24" cy="24" r="7.5" fill="#ef4444"/>
+      <polygon points="22,20.5 28.5,24 22,27.5" fill="#ffffff"/>
+      <circle cx="11.5" cy="18.5" r="1.4" fill="#22c55e"/>
+    `,
+    console: `
+      <rect x="5" y="13" width="10" height="22" rx="4" fill="#3b82f6" stroke="#1d4ed8" stroke-width="1.4"/>
+      <rect x="33" y="13" width="10" height="22" rx="4" fill="#ef4444" stroke="#b91c1c" stroke-width="1.4"/>
+      <rect x="15" y="13" width="18" height="22" fill="#1e293b" stroke="#475569" stroke-width="1.4"/>
+      <rect x="17.5" y="16" width="13" height="16" rx="1" fill="#38bdf8" fill-opacity="0.3"/>
+      <circle cx="10" cy="20" r="2" fill="#0f172a"/>
+      <circle cx="38" cy="27" r="2" fill="#0f172a"/>
+      <circle cx="38" cy="19" r="1.2" fill="#ffffff"/>
+      <circle cx="10" cy="27" r="1.2" fill="#ffffff"/>
+    `,
+    unknown: `
+      <rect x="9" y="9" width="30" height="30" rx="6" fill="#475569" fill-opacity="0.18" stroke="#64748b" stroke-width="1.8"/>
+      <rect x="15" y="15" width="18" height="18" rx="3" fill="#334155"/>
+      <circle cx="24" cy="24" r="3.5" fill="#38bdf8"/>
+      <circle cx="19" cy="19" r="1.2" fill="#22c55e"/>
+    `,
+  };
+
+  // =========================================================================
+  // Device Category Vector Icons (inline small SVG paths for Details card)
   // =========================================================================
   const ICON_PATHS = {
     internet: `<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3.6 9h16.8M3.6 15h16.8M12 3a13 13 0 0 1 0 18M12 3a13 13 0 0 0 0 18" fill="none" stroke="currentColor" stroke-width="1.5"/>`,
@@ -1052,36 +1163,47 @@
   };
 
   function deviceIconSvg(type, size = 18) {
-    const inner = ICON_PATHS[type] || ICON_PATHS.unknown;
-    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true">${inner}</svg>`;
+    const inner = DEVICE_DRAWINGS[type] || DEVICE_DRAWINGS.unknown;
+    return `<svg viewBox="0 0 48 48" width="${size + 8}" height="${size + 8}" aria-hidden="true">${inner}</svg>`;
   }
 
   // =========================================================================
-  // Tabs: Tabla | Diagrama de Red (follows modern-web-guidance tabs)
+  // Tabs: Tabla | Diagrama de Red | Auditoría y Mejoras (modern-web-guidance tabs)
   // =========================================================================
   state.activeView = "table";
   state.enrichingIps = new Set();
+  state.auditCategory = "all";
+  state.lastAudit = null;
 
   const tabTable = document.getElementById("tab-table");
   const tabDiagram = document.getElementById("tab-diagram");
+  const tabAudit = document.getElementById("tab-audit");
   const panelTable = document.getElementById("panel-table");
   const panelDiagram = document.getElementById("panel-diagram");
-  const viewTabs = [tabTable, tabDiagram];
+  const panelAudit = document.getElementById("panel-audit");
+  const viewTabs = [tabTable, tabDiagram, tabAudit].filter(Boolean);
 
   function activateViewTab(targetTab) {
-    const isDiagram = targetTab === tabDiagram;
-    state.activeView = isDiagram ? "diagram" : "table";
+    const viewMap = new Map([
+      [tabTable, "table"],
+      [tabDiagram, "diagram"],
+      [tabAudit, "audit"],
+    ]);
+    state.activeView = viewMap.get(targetTab) || "table";
 
     for (const tab of viewTabs) {
       const selected = tab === targetTab;
       tab.setAttribute("aria-selected", String(selected));
       tab.toggleAttribute("focusgroupstart", selected);
     }
-    panelTable.hidden = isDiagram;
-    panelDiagram.hidden = !isDiagram;
+    panelTable.hidden = state.activeView !== "table";
+    panelDiagram.hidden = state.activeView !== "diagram";
+    if (panelAudit) panelAudit.hidden = state.activeView !== "audit";
 
-    if (isDiagram) {
+    if (state.activeView === "diagram") {
       renderTopologyDiagram(true);
+    } else if (state.activeView === "audit") {
+      renderAuditPanel();
     }
   }
 
@@ -1270,14 +1392,14 @@
       return;
     }
 
-    const NODE_W = 186;
-    const NODE_H = 66;
+    const NODE_W = 218;
+    const NODE_H = 82;
     const COL_GAP = 22;
-    const ROW_GAP = 22;
-    const ZONE_PAD = 24;
-    const ZONE_GAP = 42;
-    const TOP_INTERNET_Y = 24;
-    const SUBNETS_TOP_Y = 148;
+    const ROW_GAP = 24;
+    const ZONE_PAD = 26;
+    const ZONE_GAP = 46;
+    const TOP_INTERNET_Y = 22;
+    const SUBNETS_TOP_Y = 160;
 
     // Pre-compute layout for each subnet cluster
     const clusters = subnets.map((sub) => {
@@ -1285,8 +1407,8 @@
       const cols = Math.max(2, Math.min(4, Math.ceil(Math.sqrt(Math.max(1, filteredDevs.length)))));
       const rows = Math.max(1, Math.ceil(filteredDevs.length / cols));
       const gridW = cols * NODE_W + (cols - 1) * COL_GAP;
-      const zoneW = Math.max(360, gridW + ZONE_PAD * 2);
-      const gwBlockH = 114;
+      const zoneW = Math.max(400, gridW + ZONE_PAD * 2);
+      const gwBlockH = 132;
       const gridH = filteredDevs.length > 0 ? rows * NODE_H + (rows - 1) * ROW_GAP : 44;
       const zoneH = 44 + gwBlockH + gridH + ZONE_PAD;
       return { sub, filteredDevs, cols, rows, zoneW, zoneH, x: 0, y: SUBNETS_TOP_Y };
@@ -1294,8 +1416,8 @@
 
     const totalW =
       clusters.reduce((acc, c) => acc + c.zoneW, 0) + Math.max(0, clusters.length - 1) * ZONE_GAP + 80;
-    const maxZoneH = Math.max(...clusters.map((c) => c.zoneH), 260);
-    const totalH = SUBNETS_TOP_Y + maxZoneH + 50;
+    const maxZoneH = Math.max(...clusters.map((c) => c.zoneH), 280);
+    const totalH = SUBNETS_TOP_Y + maxZoneH + 54;
 
     let curX = 40;
     for (const c of clusters) {
@@ -1306,9 +1428,9 @@
     cam.contentW = totalW;
     cam.contentH = totalH;
 
-    const internetX = totalW / 2 - 90;
-    const internetW = 180;
-    const internetH = 54;
+    const internetX = totalW / 2 - 110;
+    const internetW = 220;
+    const internetH = 68;
     const internetCx = internetX + internetW / 2;
     const internetBy = TOP_INTERNET_Y + internetH;
 
@@ -1318,13 +1440,13 @@
     const posByIp = new Map();
     const gwPosByCidr = new Map();
 
-    // First pass: position zones, gateways, and device nodes
+    // First pass: position zones, gateways, and illustrated device nodes
     for (const c of clusters) {
       const { sub, filteredDevs, cols, zoneW, zoneH, x, y } = c;
       const color = sub.color || "#2563eb";
       const gw = sub.gateway;
-      const gwW = 216;
-      const gwH = 66;
+      const gwW = 248;
+      const gwH = 84;
       const gwX = x + (zoneW - gwW) / 2;
       const gwY = y + 48;
       const gwCx = gwX + gwW / 2;
@@ -1336,39 +1458,40 @@
 
       zonesSvg.push(`
         <g>
-          <rect class="topo-zone" x="${x}" y="${y}" width="${zoneW}" height="${zoneH}" rx="14" stroke="${escapeHtml(color)}"/>
-          <circle cx="${x + 18}" cy="${y + 23}" r="5" fill="${escapeHtml(color)}"/>
-          <text class="topo-zone-title" x="${x + 30}" y="${y + 27}">${escapeHtml(sub.name)}</text>
+          <rect class="topo-zone" x="${x}" y="${y}" width="${zoneW}" height="${zoneH}" rx="16" stroke="${escapeHtml(color)}"/>
+          <circle cx="${x + 18}" cy="${y + 23}" r="5.5" fill="${escapeHtml(color)}"/>
+          <text class="topo-zone-title" x="${x + 31}" y="${y + 27}">${escapeHtml(sub.name)}</text>
           <text class="topo-zone-sub" x="${x + zoneW - 16}" y="${y + 27}" text-anchor="end">${escapeHtml(sub.cidr)} · ${sub.online_count}/${sub.total_count} activos</text>
         </g>
       `);
 
-      // Render Gateway node
+      // Render Gateway node with detailed router illustration
       if (gw) {
-        const gwTitle = truncate(gw.custom_hostname || gw.identification || gw.vendor || "Router / Gateway", 23);
-        const gwSub = gw.vendor ? truncate(gw.vendor, 24) : "Puerta de enlace";
+        const gwTitle = truncate(gw.custom_hostname || gw.identification || gw.vendor || "Router / Gateway", 21);
+        const gwSub = gw.vendor ? truncate(gw.vendor, 22) : "Puerta de enlace";
         const portsN = (gw.ports || []).length;
         const selectedCls = state.selectedIp === gw.ipv4 ? " selected" : "";
         nodesSvg.push(`
           <g class="topo-node gateway${selectedCls}" data-ip="${escapeHtml(gw.ipv4)}" data-virtual="${gw.virtual ? "1" : "0"}" transform="translate(${gwX}, ${gwY})">
-            <rect class="topo-node-bg" width="${gwW}" height="${gwH}" rx="10" stroke="${escapeHtml(color)}"/>
-            <g transform="translate(12, 16)" style="color:${escapeHtml(color)}">${ICON_PATHS.router}</g>
-            <circle cx="${gwW - 14}" cy="14" r="4.5" fill="${gw.is_online ? "#22c55e" : "#ef4444"}"/>
-            <text class="topo-node-title" x="44" y="24">${escapeHtml(gwTitle)}</text>
-            <text class="topo-node-ip" x="44" y="40">${escapeHtml(gw.ipv4)}</text>
-            <text class="topo-node-meta" x="44" y="55">${escapeHtml(gwSub)}</text>
+            <rect class="topo-node-bg" width="${gwW}" height="${gwH}" rx="12" stroke="${escapeHtml(color)}"/>
+            <rect class="topo-illus-frame" x="10" y="13" width="58" height="58" rx="10"/>
+            <g transform="translate(15, 18)">${DEVICE_DRAWINGS.router}</g>
+            <circle cx="${gwW - 14}" cy="15" r="4.8" fill="${gw.is_online ? "#22c55e" : "#ef4444"}"/>
+            <text class="topo-node-title" x="78" y="29">${escapeHtml(gwTitle)}</text>
+            <text class="topo-node-ip" x="78" y="47">${escapeHtml(gw.ipv4)}</text>
+            <text class="topo-node-meta" x="78" y="64">${escapeHtml(gwSub)}</text>
             ${
               portsN > 0
-                ? `<rect class="topo-ports-pill" x="${gwW - 44}" y="42" width="34" height="16" rx="8"/>
-                   <text class="topo-ports-text" x="${gwW - 27}" y="53" text-anchor="middle">${portsN}p</text>`
+                ? `<rect class="topo-ports-pill" x="${gwW - 44}" y="54" width="34" height="17" rx="8.5"/>
+                   <text class="topo-ports-text" x="${gwW - 27}" y="66" text-anchor="middle">${portsN}p</text>`
                 : ""
             }
           </g>
         `);
       }
 
-      // Render child devices in grid
-      const gridTopY = gwBy + 42;
+      // Render child devices in grid with rich device drawings
+      const gridTopY = gwBy + 44;
       const gridW = cols * NODE_W + (cols - 1) * COL_GAP;
       const gridStartX = x + (zoneW - gridW) / 2;
 
@@ -1386,38 +1509,38 @@
         const ncx = nx + NODE_W / 2;
         posByIp.set(dev.ipv4, { cx: ncx, cy: ny + NODE_H / 2, topY: ny, botY: ny + NODE_H });
 
-        // Curved edge from gateway hub to device
-        const midY = gwBy + 18;
+        const midY = gwBy + 20;
         const edgeCls = `topo-edge${dev.is_online ? "" : " offline"}${state.selectedIp === dev.ipv4 ? " highlighted" : ""}`;
         edgesSvg.push(
-          `<path class="${edgeCls}" data-target-ip="${escapeHtml(dev.ipv4)}" d="M ${gwCx} ${gwBy} C ${gwCx} ${midY}, ${ncx} ${ny - 20}, ${ncx} ${ny}"/>`
+          `<path class="${edgeCls}" data-target-ip="${escapeHtml(dev.ipv4)}" d="M ${gwCx} ${gwBy} C ${gwCx} ${midY}, ${ncx} ${ny - 22}, ${ncx} ${ny}"/>`
         );
 
         const extra = dev.extra || {};
         const dtype = dev.device_type || "unknown";
         const primaryLabel = truncate(
           dev.custom_hostname || extra.model || dev.identification || extra.brand || dev.vendor || dev.ipv4,
-          19
+          17
         );
         const secondaryLabel = truncate(
-          extra.category_label || dev.vendor || "Equipo de red",
-          21
+          dev.location || extra.category_label || dev.vendor || "Equipo de red",
+          19
         );
         const portsN = (dev.ports || []).length;
         const selectedCls = state.selectedIp === dev.ipv4 ? " selected" : "";
 
         nodesSvg.push(`
           <g class="topo-node${selectedCls}" data-ip="${escapeHtml(dev.ipv4)}" transform="translate(${nx}, ${ny})">
-            <rect class="topo-node-bg" width="${NODE_W}" height="${NODE_H}" rx="9"/>
-            <g transform="translate(10, 17)" style="color:${escapeHtml(color)}">${ICON_PATHS[dtype] || ICON_PATHS.unknown}</g>
-            <circle cx="${NODE_W - 12}" cy="13" r="4" fill="${dev.is_online ? "#22c55e" : "#ef4444"}"/>
-            <text class="topo-node-title" x="40" y="23">${escapeHtml(primaryLabel)}</text>
-            <text class="topo-node-ip" x="40" y="39">${escapeHtml(dev.ipv4)}</text>
-            <text class="topo-node-meta" x="40" y="54">${escapeHtml(secondaryLabel)}</text>
+            <rect class="topo-node-bg" width="${NODE_W}" height="${NODE_H}" rx="11"/>
+            <rect class="topo-illus-frame" x="9" y="13" width="56" height="56" rx="10"/>
+            <g transform="translate(13, 17)">${DEVICE_DRAWINGS[dtype] || DEVICE_DRAWINGS.unknown}</g>
+            <circle cx="${NODE_W - 13}" cy="14" r="4.2" fill="${dev.is_online ? "#22c55e" : "#ef4444"}"/>
+            <text class="topo-node-title" x="74" y="28">${escapeHtml(primaryLabel)}</text>
+            <text class="topo-node-ip" x="74" y="46">${escapeHtml(dev.ipv4)}</text>
+            <text class="topo-node-meta" x="74" y="63">${escapeHtml(secondaryLabel)}</text>
             ${
               portsN > 0
-                ? `<rect class="topo-ports-pill" x="${NODE_W - 40}" y="42" width="32" height="16" rx="8"/>
-                   <text class="topo-ports-text" x="${NODE_W - 24}" y="53" text-anchor="middle">${portsN}p</text>`
+                ? `<rect class="topo-ports-pill" x="${NODE_W - 41}" y="53" width="32" height="17" rx="8.5"/>
+                   <text class="topo-ports-text" x="${NODE_W - 25}" y="65" text-anchor="middle">${portsN}p</text>`
                 : ""
             }
           </g>
@@ -1433,7 +1556,7 @@
       const casc = sub.cascaded_from;
       if (casc && posByIp.has(casc.wan_ip)) {
         const wanPos = posByIp.get(casc.wan_ip);
-        const ctrlY = Math.min(wanPos.topY, gwPos.topY) - 48;
+        const ctrlY = Math.min(wanPos.topY, gwPos.topY) - 52;
         edgesSvg.push(
           `<path class="topo-edge uplink cascaded" d="M ${wanPos.cx} ${wanPos.topY} C ${wanPos.cx} ${ctrlY}, ${gwPos.cx} ${ctrlY}, ${gwPos.cx} ${gwPos.topY}"/>`
         );
@@ -1450,13 +1573,13 @@
       }
     }
 
-    // Internet / WAN root node
+    // Illustrated Internet / WAN root node
     const internetNode = `
       <g class="topo-node" transform="translate(${internetX}, ${TOP_INTERNET_Y})">
-        <rect class="topo-node-bg" width="${internetW}" height="${internetH}" rx="27" stroke="var(--accent)"/>
-        <g transform="translate(18, 15)" style="color:var(--accent)">${ICON_PATHS.internet}</g>
-        <text class="topo-node-title" x="50" y="25">Internet / WAN</text>
-        <text class="topo-node-meta" x="50" y="40">${subnets.length} red(es) en casa</text>
+        <rect class="topo-node-bg" width="${internetW}" height="${internetH}" rx="34" stroke="var(--accent)"/>
+        <g transform="translate(14, 10)">${DEVICE_DRAWINGS.internet}</g>
+        <text class="topo-node-title" x="72" y="30">Internet / WAN</text>
+        <text class="topo-node-meta" x="72" y="48">${subnets.length} red(es) configuradas</text>
       </g>
     `;
 
@@ -1476,7 +1599,6 @@
         const ip = nodeEl.dataset.ip;
         if (state.devices.has(ip)) {
           selectDevice(ip);
-          // Make sure details pane is open when clicking a node in the diagram
           if (detailsPane.classList.contains("collapsed")) {
             detailsPane.classList.remove("collapsed");
             btnToggleDetails.classList.add("active");
@@ -1491,6 +1613,182 @@
     } else {
       applyCamera();
     }
+  }
+
+  // =========================================================================
+  // Network Architecture Audit & Recommendations Panel
+  // =========================================================================
+  const auditScoreArc = document.getElementById("audit-score-arc");
+  const auditOverallScore = document.getElementById("audit-overall-score");
+  const auditSubtitle = document.getElementById("audit-subtitle");
+  const auditSubscores = document.getElementById("audit-subscores");
+  const auditFindingsEl = document.getElementById("audit-findings");
+  const auditIpPlanSection = document.getElementById("audit-ip-plan-section");
+  const auditIpPlanBody = document.getElementById("audit-ip-plan-body");
+  const btnRefreshAudit = document.getElementById("btn-refresh-audit");
+  const auditCatFilters = document.getElementById("audit-cat-filters");
+
+  let auditTimer = null;
+  function scheduleAuditRender() {
+    clearTimeout(auditTimer);
+    auditTimer = setTimeout(renderAuditPanel, 150);
+  }
+
+  function scoreColor(val) {
+    if (val >= 80) return "#22c55e";
+    if (val >= 60) return "#f59e0b";
+    return "#ef4444";
+  }
+
+  const SEV_LABELS = {
+    critical: "Crítica",
+    warning: "Advertencia",
+    info: "Sugerencia",
+    good: "Óptimo",
+  };
+
+  const CAT_LABELS = {
+    topology: "Topología",
+    security: "Seguridad",
+    performance: "Rendimiento",
+    organization: "Organización",
+  };
+
+  function paintAuditFindings() {
+    if (!state.lastAudit || !auditFindingsEl) return;
+    const all = state.lastAudit.findings || [];
+    const filtered =
+      state.auditCategory === "all"
+        ? all
+        : all.filter((f) => f.category === state.auditCategory);
+
+    if (filtered.length === 0) {
+      auditFindingsEl.innerHTML = `<p class="muted">Sin hallazgos en esta categoría.</p>`;
+      return;
+    }
+
+    auditFindingsEl.innerHTML = filtered
+      .map((f) => {
+        const ipsHtml = (f.affected_ips || []).length
+          ? `<div class="finding-ips">
+              <span class="spec-label">Equipos:</span>
+              ${f.affected_ips
+                .map((ip) => {
+                  const dev = state.devices.get(ip);
+                  const lbl = dev && dev.custom_hostname ? `${ip} (${dev.custom_hostname})` : ip;
+                  return `<button type="button" class="ip-chip" data-jump-ip="${escapeHtml(ip)}">${escapeHtml(lbl)}</button>`;
+                })
+                .join("")}
+             </div>`
+          : "";
+        return `
+          <article class="finding-card sev-${escapeHtml(f.severity)}">
+            <div class="finding-head">
+              <div class="finding-title-wrap">
+                <span class="sev-badge ${escapeHtml(f.severity)}">${escapeHtml(SEV_LABELS[f.severity] || f.severity)}</span>
+                <h3 class="finding-title">${escapeHtml(f.title)}</h3>
+              </div>
+              <span class="cat-tag">${escapeHtml(CAT_LABELS[f.category] || f.category)}</span>
+            </div>
+            <p class="finding-desc">${escapeHtml(f.description)}</p>
+            <div class="finding-rec"><strong>Recomendación:</strong> ${escapeHtml(f.recommendation)}</div>
+            ${ipsHtml}
+          </article>
+        `;
+      })
+      .join("");
+
+    auditFindingsEl.querySelectorAll("[data-jump-ip]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const ip = btn.dataset.jumpIp;
+        if (state.devices.has(ip)) {
+          selectDevice(ip);
+          if (detailsPane.classList.contains("collapsed")) {
+            detailsPane.classList.remove("collapsed");
+            btnToggleDetails.classList.add("active");
+            btnToggleDetails.setAttribute("aria-pressed", "true");
+          }
+        }
+      });
+    });
+  }
+
+  async function renderAuditPanel() {
+    let data;
+    try {
+      const res = await fetch("/api/recommendations");
+      data = await res.json();
+    } catch {
+      return;
+    }
+    state.lastAudit = data;
+
+    const overall = Number(data.overall_score || 0);
+    const circ = 263.9;
+    if (auditOverallScore) auditOverallScore.textContent = String(overall);
+    if (auditScoreArc) {
+      auditScoreArc.style.strokeDashoffset = String(circ * (1 - overall / 100));
+      auditScoreArc.style.stroke = scoreColor(overall);
+    }
+
+    const sum = data.summary || {};
+    if (auditSubtitle) {
+      auditSubtitle.textContent = `${sum.total_devices || 0} equipos en ${sum.active_subnets || 0} subred(es) · ${sum.critical || 0} crítica(s) · ${sum.warning || 0} advertencia(s) · ${sum.info || 0} sugerencia(s)`;
+    }
+
+    if (auditSubscores) {
+      const sc = data.scores || {};
+      auditSubscores.innerHTML = [
+        ["topology", "Topología"],
+        ["security", "Seguridad"],
+        ["performance", "Rendimiento"],
+        ["organization", "Organización"],
+      ]
+        .map(([key, label]) => {
+          const v = Number(sc[key] || 0);
+          return `
+            <div class="subscore-item">
+              <div class="subscore-top"><span>${label}</span><span>${v}/100</span></div>
+              <div class="subscore-bar"><div class="subscore-fill" style="width:${v}%;background:${scoreColor(v)}"></div></div>
+            </div>
+          `;
+        })
+        .join("");
+    }
+
+    paintAuditFindings();
+
+    const plan = data.ip_plan || [];
+    if (auditIpPlanSection && auditIpPlanBody) {
+      auditIpPlanSection.hidden = plan.length === 0;
+      auditIpPlanBody.innerHTML = plan
+        .map(
+          (row) => `
+          <tr>
+            <td class="mono">${escapeHtml(row.range)}</td>
+            <td><strong>${escapeHtml(row.role)}</strong></td>
+            <td>${escapeHtml(row.example)}</td>
+          </tr>
+        `
+        )
+        .join("");
+    }
+  }
+
+  if (btnRefreshAudit) {
+    btnRefreshAudit.addEventListener("click", renderAuditPanel);
+  }
+
+  if (auditCatFilters) {
+    auditCatFilters.querySelectorAll("[data-audit-cat]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.auditCategory = btn.dataset.auditCat;
+        auditCatFilters.querySelectorAll("[data-audit-cat]").forEach((b) => {
+          b.setAttribute("aria-pressed", String(b === btn));
+        });
+        paintAuditFindings();
+      });
+    });
   }
 
   loadBootstrap().then(connectEvents);

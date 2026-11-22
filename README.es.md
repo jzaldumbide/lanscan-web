@@ -20,10 +20,13 @@ Aplicación web self-hosted inspirada en **LanScan**, diseñada para descubrir, 
 - **Tabla completa + Panel Inspector (`Details`):**
   - Columnas ordenables y búsqueda instantánea: `IPv4`, `MAC`, `Hostname`, `Ping`, `Vendor`, `Identification`, `DNS Name`, `mDNS Name`, `SMB Name`, `SMB Domain`, `Ports` y `Red`.
   - **Edición completa de detalles:** edita y guarda en SQLite el hostname personalizado, categoría del equipo (bloqueable para no ser sobrescrita), marca, modelo/identificación, ubicación física, URL de administración, usuario/contraseña de acceso y comentarios.
-- **Diagrama de Red Interactivo:**
-  - Vista topológica en SVG con **Internet / WAN → Routers/Gateways → Subredes → Equipos** con íconos vectoriales por categoría (Router, NAS, Smart TV, Cámara/DVR, Impresora, Consola, IoT, Streaming, PC/Móvil).
+- **Diagrama de Red Interactivo con Ilustraciones de Dispositivos:**
+  - Vista topológica en SVG con **Internet / WAN → Routers/Gateways → Subredes → Equipos** y dibujos vectoriales detallados por tipo (Router, NAS de 4 bahías, Smart TV, Cámara IP, Impresora, Consola, IoT, Streaming, Laptop, Móvil).
   - Detección automática de **routers en cascada** por coincidencia de MAC WAN/LAN.
   - Zoom con rueda/botones, arrastre (pan), ajuste automático y clic en cualquier nodo para inspeccionar su ficha y puertos.
+- **Auditoría Automática de Arquitectura y Recomendaciones:**
+  - Calcula una **Puntuación de Salud de Red (0–100)** en **Topología**, **Seguridad**, **Rendimiento** y **Organización**.
+  - Detecta automáticamente **Doble NAT / subredes fragmentadas**, **NAS con múltiples IPs sin trunking**, **IoT y cámaras sin aislamiento**, **puertos inseguros** (FTP, Telnet, RTSP, bases de datos expuestas, HTTP administrativo) y genera un **Plan de Reservas DHCP** adaptado a tu subred.
 - **Motor de Enriquecimiento por Marca y Protocolos:**
   - Base local IEEE OUI (`nmap-mac-prefixes`) + consulta online automática con caché en SQLite (`maclookup.app`).
   - Sondeo activo de protocolos: API de **Samsung SmartTV** (`:8001` con decodificación de pulgadas, serie y Tizen), metadata de **QNAP QTS**, banners/títulos/realms HTTP, certificados **TLS** y **SNMP `sysDescr`** (`UDP 161`).
@@ -126,6 +129,7 @@ En modo `host`, el contenedor obtiene **ARP capa 2, SSDP y mDNS de forma 100% na
 | `POST` | `/api/scan/start` | Inicia escaneo en todas las subredes activas o las indicadas en `subnet_ids` |
 | `POST` | `/api/scan/stop` | Detiene el escaneo en curso |
 | `GET` | `/api/topology` | Devuelve el grafo de subredes, gateways, cascadas y dispositivos |
+| `GET` | `/api/recommendations` | Ejecuta la auditoría automática de arquitectura y puntuación de salud |
 | `PATCH` | `/api/devices/{ipv4}` | Guarda detalles editados (hostname, categoría, ubicación, credenciales, notas) |
 | `POST` | `/api/devices/{ipv4}/port-scan` | Ejecuta escaneo de puertos (`quick`, `common`, `full`, `custom`) |
 | `POST` | `/api/devices/{ipv4}/enrich` | Ejecuta enriquecimiento profundo (protocolos, TLS, SNMP, OUI online) |

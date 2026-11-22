@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, enrichment
+from . import advisor, db, enrichment
 from .scanner import deep_enrich_device, lookup_vendor, normalize_mac, scan_host_ports, scan_manager
 
 app = FastAPI(title="LanScan Web", version="1.0.0")
@@ -153,6 +153,11 @@ def patch_device(ipv4: str, payload: DeviceMetaPayload) -> dict[str, Any]:
 @app.get("/api/topology")
 def get_topology() -> dict[str, Any]:
     return enrichment.build_topology(db.list_subnets(), db.list_devices())
+
+
+@app.get("/api/recommendations")
+def get_recommendations() -> dict[str, Any]:
+    return advisor.analyze_network(db.list_subnets(), db.list_devices())
 
 
 @app.post("/api/devices/{ipv4}/enrich")
