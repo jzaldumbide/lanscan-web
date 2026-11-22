@@ -1,0 +1,19 @@
+services:
+  lanscan-web:
+    build: .
+    container_name: lanscan-web
+    restart: unless-stopped
+    # En macOS (Docker Desktop) utiliza el mapeo de puertos normal.
+    # En Linux / QNAP / Synology NAS puedes descomentar "network_mode: host" (y comentar "ports")
+    # para obtener escaneo ARP capa 2, SSDP y mDNS nativos directamente sobre tu interfaz física.
+    # network_mode: host
+    ports:
+      - "${LANSCAN_PORT:-8787}:8787"
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    environment:
+      - LANSCAN_DB=/data/lanscan.db
+      - DEFAULT_SUBNETS=${DEFAULT_SUBNETS:-Red Principal|192.168.1.0/24}
+    volumes:
+      - ./data:/data

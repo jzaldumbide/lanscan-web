@@ -1,0 +1,23 @@
+# Local database & persisted credentials (NEVER commit to GitHub!)
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+
+# Environment files
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

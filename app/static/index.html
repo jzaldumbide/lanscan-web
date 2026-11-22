@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LanScan Web — Escáner Multi-Red</title>
+  <meta name="color-scheme" content="light dark">
+  <script>
+    try {
+      document.querySelector('meta[name="color-scheme"]').content =
+        localStorage.getItem("color-scheme") ?? "light dark";
+    } catch {}
+  </script>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <!-- macOS-style Top Toolbar -->
+    <header class="toolbar" aria-label="Barra de herramientas principal">
+      <div class="toolbar-group toolbar-left">
+        <div class="split-action">
+          <button type="button" id="btn-scan" class="tool-btn primary-tool" title="Iniciar escaneo de red">
+            <span class="tool-icon-circle" id="scan-icon-wrap" aria-hidden="true">
+              <svg id="icon-play" viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M4 2.8v10.4L13 8 4 2.8z"/></svg>
+              <svg id="icon-stop" viewBox="0 0 16 16" width="13" height="13" fill="currentColor" hidden><rect x="3" y="3" width="10" height="10" rx="1.5"/></svg>
+            </span>
+            <span class="tool-label" id="btn-scan-label">Start LanScan</span>
+          </button>
+          <select id="scan-target-select" class="scan-select" aria-label="Red objetivo para escanear" title="Seleccionar red a escanear">
+            <option value="all">Todas las redes</option>
+          </select>
+        </div>
+
+        <button type="button" id="btn-edit-hostname" class="tool-btn" disabled title="Editar detalles, categoría y credenciales del equipo seleccionado">
+          <span class="tool-icon-circle" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M12.1 1.9a1.5 1.5 0 0 1 2.1 2.1l-8.4 8.4-3.1.8.8-3.1 8.6-8.2z"/></svg>
+          </span>
+          <span class="tool-label">Editar Equipo</span>
+        </button>
+
+        <button type="button" id="btn-clear" class="tool-btn" command="show-modal" commandfor="clear-dialog" title="Limpiar resultados guardados">
+          <span class="tool-icon-circle" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M5.5 2h5l.7 1H14v1.5H2V3h2.8l.7-1zM3.5 5.5h9l-.7 8.2a1.3 1.3 0 0 1-1.3 1.3h-5a1.3 1.3 0 0 1-1.3-1.3l-.7-8.2z"/></svg>
+          </span>
+          <span class="tool-label">Clear Results</span>
+        </button>
+
+        <button type="button" id="btn-config" class="tool-btn" command="show-modal" commandfor="config-dialog" title="Configurar redes y opciones">
+          <span class="tool-icon-circle" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M9.4 1.2l.4 1.6a5.4 5.4 0 0 1 1.3.7l1.5-.6 1.4 2.4-1.2 1.1c.1.4.1.9.1 1.3s0 .9-.1 1.3l1.2 1.1-1.4 2.4-1.5-.6c-.4.3-.8.5-1.3.7l-.4 1.6H6.6l-.4-1.6a5.4 5.4 0 0 1-1.3-.7l-1.5.6L2 10.1l1.2-1.1c-.1-.4-.1-.9-.1-1.3s0-.9.1-1.3L2 5.3l1.4-2.4 1.5.6c.4-.3.8-.5 1.3-.7l.4-1.6h2.8zM8 5.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8z"/></svg>
+          </span>
+          <span class="tool-label">Config</span>
+        </button>
+
+        <button type="button" id="btn-enrich-all" class="tool-btn" title="Cargar información adicional por marca, protocolos y OUI para todos los equipos">
+          <span class="tool-icon-circle" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5l1.6 4.1 4.4.4-3.3 2.9 1 4.3L8 10.9l-3.7 2.3 1-4.3L2 6l4.4-.4L8 1.5z"/></svg>
+          </span>
+          <span class="tool-label" id="btn-enrich-all-label">Enriquecer</span>
+        </button>
+      </div>
+
+      <!-- Center Scan Range & Live Progress -->
+      <div class="toolbar-center">
+        <div class="scan-status-text" id="scan-status-text">Listo — Selecciona una red o escanea todas</div>
+        <div class="progress-track" id="progress-track" aria-hidden="true">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+      </div>
+
+      <!-- Right Search & Inspector Toggle -->
+      <div class="toolbar-group toolbar-right">
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.8"/><path d="M10.7 10.7 14 14"/>
+          </svg>
+          <input type="search" id="search-input" placeholder="Search IP, MAC, Vendor, Puerto..." aria-label="Buscar equipos">
+        </div>
+
+        <button type="button" id="btn-toggle-details" class="tool-btn active" aria-pressed="true" title="Mostrar u ocultar panel de detalles">
+          <span class="tool-icon-circle" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2.5" width="13" height="11" rx="1.8"/><line x1="10" y1="2.5" x2="10" y2="13.5"/></svg>
+          </span>
+          <span class="tool-label">Details</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Multi-Subnet Filter & View Tabs Strip -->
+    <div class="filter-bar" aria-label="Vistas y filtros por subred">
+      <div class="filter-left">
+        <div class="view-tabs" role="tablist" focusgroup="tablist nomemory" aria-label="Vista principal">
+          <button type="button" role="tab" id="tab-table" aria-selected="true" focusgroupstart>Tabla</button>
+          <button type="button" role="tab" id="tab-diagram" aria-selected="false">Diagrama de Red</button>
+        </div>
+        <div class="subnet-pills" id="subnet-pills" role="group" aria-label="Filtrar por red"></div>
+      </div>
+      <div class="filter-right">
+        <label class="inline-check">
+          <input type="checkbox" id="filter-online-only">
+          <span>Solo activos</span>
+        </label>
+        <a href="/api/export.csv" class="subtle-link" download>Exportar CSV</a>
+        <span class="device-counter" id="device-counter">0 equipos</span>
+      </div>
+    </div>
+
+    <!-- Main Split Workspace: Views (Table / Diagram) + Inspector -->
+    <main class="workspace" id="workspace">
+      <section class="main-views">
+        <!-- Tab Panel 1: Table -->
+        <div id="panel-table" class="view-panel" role="tabpanel" aria-labelledby="tab-table">
+          <div class="table-pane">
+            <div tabindex="0" role="region" aria-labelledby="devices-caption" class="table-wrapper">
+              <table id="devices-table">
+            <caption id="devices-caption" class="sr-only">Equipos detectados en las redes locales</caption>
+            <thead>
+              <tr>
+                <th scope="col" data-type="number" aria-sort="ascending">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    IPv4 address <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="text">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    MAC address <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="text">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    Hostname <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="number" class="col-center">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    Ping <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="text">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    Vendor <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="text">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    Identification <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="text">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    DNS Name <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="text">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    mDNS Name <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="text">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    SMB Name <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="text">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    SMB Domain <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="number">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    Ports <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th scope="col" data-type="text">
+                  <button type="button" commandfor="devices-table" command="--sort">
+                    Red <span class="sort-icon" aria-hidden="true"></span>
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="devices-tbody"></tbody>
+          </table>
+          <div class="empty-state" id="empty-state" hidden>
+            <p class="empty-title">Sin equipos escaneados todavía</p>
+            <p class="empty-sub">Haz clic en <strong>Start LanScan</strong> para descubrir todos los dispositivos en tus redes configuradas (<code>192.168.1.0/24</code>, <code>192.168.3.0/24</code>, etc.).</p>
+          </div>
+            </div>
+            <div id="sort-status" role="status" class="sr-only"></div>
+          </div>
+        </div>
+
+        <!-- Tab Panel 2: Interactive Multi-Subnet Network Topology Diagram -->
+        <div id="panel-diagram" class="view-panel" role="tabpanel" aria-labelledby="tab-diagram" hidden>
+          <div class="diagram-pane">
+            <div class="diagram-toolbar">
+              <div class="diagram-controls">
+                <button type="button" id="btn-zoom-out" class="secondary-btn" title="Alejar">−</button>
+                <span id="zoom-level" class="zoom-label">100%</span>
+                <button type="button" id="btn-zoom-in" class="secondary-btn" title="Acercar">+</button>
+                <button type="button" id="btn-zoom-fit" class="secondary-btn" title="Ajustar diagrama a la pantalla">Ajustar</button>
+              </div>
+              <div class="diagram-legend" aria-label="Leyenda del diagrama">
+                <span><i class="ping-dot online"></i> Activo</span>
+                <span><i class="ping-dot offline"></i> Inactivo</span>
+                <span class="legend-hint">Arrastra para mover · Rueda para zoom · Clic en un equipo para ver ficha y puertos</span>
+              </div>
+            </div>
+            <div class="diagram-canvas-wrap" id="diagram-canvas-wrap">
+              <svg id="topology-svg" class="topology-svg" role="img" aria-label="Diagrama topológico de equipos conectados en las redes de casa"></svg>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Details Inspector Panel -->
+      <aside class="details-pane" id="details-pane" aria-label="Detalles del equipo seleccionado">
+        <div class="details-header">
+          <div class="port-scan-controls">
+            <select id="port-scan-mode" class="compact-select" aria-label="Modo de escaneo de puertos" disabled>
+              <option value="quick">Port Scan · Rápido</option>
+              <option value="common">Port Scan · Top 1000</option>
+              <option value="full">Port Scan · Completo</option>
+              <option value="custom">Port Scan · Personalizado…</option>
+            </select>
+            <button type="button" id="btn-port-scan" class="action-btn" disabled>Escanear</button>
+          </div>
+          <div class="enrich-bar details-btn-row">
+            <button type="button" id="btn-enrich-device" class="secondary-btn" disabled>
+              Enriquecer info
+            </button>
+            <button type="button" id="btn-details-edit" class="secondary-btn" disabled>
+              Editar detalles
+            </button>
+          </div>
+        </div>
+
+        <div class="details-body" id="details-body">
+          <!-- Enriched Brand & Device Profile Card -->
+          <div id="det-profile-card" class="profile-card" hidden>
+            <div class="profile-head">
+              <span id="det-type-icon" class="profile-icon" aria-hidden="true"></span>
+              <div class="profile-titles">
+                <div id="det-category" class="profile-category"></div>
+                <div id="det-brand-model" class="profile-brand"></div>
+              </div>
+            </div>
+            <p id="det-summary" class="profile-summary"></p>
+            <div id="det-extra-specs" class="extra-specs"></div>
+            <div id="det-quick-links" class="quick-links"></div>
+            <div id="det-security-notes" class="security-notes"></div>
+          </div>
+
+          <!-- Router / Device Access & Password Card -->
+          <div id="det-access-card" class="access-card" hidden>
+            <div class="section-head">
+              <h3 id="det-access-title">Acceso / Credenciales</h3>
+              <button type="button" id="btn-edit-creds" class="subtle-action-btn">Editar</button>
+            </div>
+            <div id="det-access-body" class="access-body"></div>
+          </div>
+
+          <dl class="kv-list">
+            <div class="kv-row"><dt>IPv4 Address:</dt><dd id="det-ipv4" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>IPv6 Addresses:</dt><dd id="det-ipv6" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>MAC Address:</dt><dd id="det-mac" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>Hostname:</dt><dd id="det-hostname" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>Ubicación:</dt><dd id="det-location" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>Vendor:</dt><dd id="det-vendor" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>Identification:</dt><dd id="det-identification" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>DNS Name:</dt><dd id="det-dns" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>mDNS Name:</dt><dd id="det-mdns" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>SMB Name:</dt><dd id="det-smb" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>SMB Domain:</dt><dd id="det-smb-domain" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>Red / Subred:</dt><dd id="det-subnet" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>Estado / Ping:</dt><dd id="det-ping" class="muted">No Selection</dd></div>
+            <div class="kv-row"><dt>Última vez visto:</dt><dd id="det-lastseen" class="muted">No Selection</dd></div>
+          </dl>
+
+          <div class="details-section">
+            <div class="section-head">
+              <h3>Port Scan</h3>
+              <span class="port-scan-status" id="det-port-status"></span>
+            </div>
+            <div id="det-ports-list" class="ports-list">
+              <span class="muted">No Selection</span>
+            </div>
+          </div>
+
+          <div class="details-section">
+            <div class="section-head">
+              <label for="det-comments"><h3>Comments</h3></label>
+              <span class="save-indicator" id="comments-saved"></span>
+            </div>
+            <textarea id="det-comments" rows="3" placeholder="Añade notas sobre este equipo (ubicación, usuario, credenciales, etc.)" disabled></textarea>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Config Modal Dialog -->
+  <dialog id="config-dialog" closedby="any" aria-labelledby="config-dialog-title">
+    <div class="dialog-header">
+      <h2 id="config-dialog-title">Configuración de Redes y Escaneo</h2>
+      <button type="button" class="icon-close" command="close" commandfor="config-dialog" aria-label="Cerrar">&times;</button>
+    </div>
+
+    <div class="dialog-body">
+      <section class="config-section">
+        <h3>Redes / Subredes de Casa</h3>
+        <p class="help-text">Agrega todas las subredes que tengas en casa (por ejemplo <code>192.168.1.0/24</code>, <code>192.168.3.0/24</code>, <code>10.0.0.0/24</code>). Puedes escanear todas juntas o de una en una.</p>
+        <div id="subnets-config-list" class="subnets-list"></div>
+
+        <form id="add-subnet-form" class="add-subnet-row">
+          <input type="text" id="new-subnet-name" placeholder="Nombre (ej. Wi-Fi Sala)" required autofocus>
+          <input type="text" id="new-subnet-cidr" placeholder="CIDR (ej. 192.168.2.0/24)" required>
+          <input type="color" id="new-subnet-color" value="#059669" aria-label="Color de etiqueta">
+          <button type="submit" class="action-btn">Agregar</button>
+        </form>
+        <div id="subnet-form-error" class="form-error" role="alert"></div>
+      </section>
+
+      <section class="config-section">
+        <h3>Opciones de Escaneo</h3>
+        <label class="toggle-row">
+          <input type="checkbox" id="opt-auto-quick-ports">
+          <span>Escanear puertos comunes automáticamente al descubrir cada equipo <em>(escaneo más lento, pero llena la columna Ports al instante)</em></span>
+        </label>
+      </section>
+
+      <section class="config-section">
+        <h3>Apariencia</h3>
+        <div class="theme-group" role="radiogroup" aria-label="Tema de color">
+          <label class="radio-pill">
+            <input type="radio" name="theme-mode" value="system">
+            <span id="theme-system-label">Sistema</span>
+          </label>
+          <label class="radio-pill">
+            <input type="radio" name="theme-mode" value="light">
+            <span>Claro</span>
+          </label>
+          <label class="radio-pill">
+            <input type="radio" name="theme-mode" value="dark">
+            <span>Oscuro</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="config-section">
+        <h3>Direcciones MAC en macOS (Docker Desktop)</h3>
+        <p class="help-text">
+          En macOS, Docker Desktop usa una VM con NAT y no puede leer la tabla ARP física directamente.
+          Ejecuta <code>./scripts/macos-arp-sync.sh</code> en tu Mac para enriquecer al instante todas las direcciones MAC y fabricantes (OUI), o despliega el contenedor en tu QNAP NAS con <code>network_mode: host</code> para detección ARP nativa.
+        </p>
+      </section>
+    </div>
+
+    <div class="dialog-footer">
+      <form method="dialog">
+        <button value="close" class="action-btn">Listo</button>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Edit Device Full Details Modal Dialog -->
+  <dialog id="edit-hostname-dialog" closedby="any" aria-labelledby="edit-hostname-title">
+    <div class="dialog-header">
+      <h2 id="edit-hostname-title">Editar detalles del equipo</h2>
+      <button type="button" class="icon-close" command="close" commandfor="edit-hostname-dialog" aria-label="Cerrar">&times;</button>
+    </div>
+    <form method="dialog" id="edit-hostname-form" aria-labelledby="edit-hostname-title">
+      <div class="dialog-body">
+        <p class="help-text">Equipo seleccionado: <strong id="edit-hostname-ip"></strong></p>
+
+        <fieldset class="edit-fieldset">
+          <legend>Identidad y ubicación</legend>
+          <div class="form-grid">
+            <div class="field-group">
+              <label class="field-label" for="edit-hostname-input">Hostname personalizado</label>
+              <input type="text" id="edit-hostname-input" name="custom_hostname" class="full-input" placeholder="Ej. Router Sala, Smart TV, NAS" enterkeyhint="next" autofocus>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="edit-type-input">Categoría del equipo</label>
+              <select id="edit-type-input" name="device_type" class="full-input">
+                <option value="router">Router / Puerta de enlace</option>
+                <option value="nas">Servidor NAS</option>
+                <option value="tv">Televisor Smart TV</option>
+                <option value="camera">Cámara IP / DVR-NVR</option>
+                <option value="printer">Impresora de red</option>
+                <option value="computer">Computadora / Mac</option>
+                <option value="mobile">Teléfono / Tablet</option>
+                <option value="iot">Dispositivo IoT / Domótica</option>
+                <option value="media_player">Streaming / Fire TV / Cast</option>
+                <option value="console">Consola de videojuegos</option>
+                <option value="unknown">Otro dispositivo</option>
+              </select>
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="edit-vendor-input">Marca / Fabricante</label>
+              <input type="text" id="edit-vendor-input" name="vendor" class="full-input" placeholder="Ej. Huawei, Nokia, Samsung, QNAP" enterkeyhint="next">
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="edit-ident-input">Modelo / Identificación</label>
+              <input type="text" id="edit-ident-input" name="identification" class="full-input" placeholder="Ej. Smart TV 4K, NAS 4-Bay, Router Wi-Fi 6" enterkeyhint="next">
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="edit-location-input">Ubicación física</label>
+              <input type="text" id="edit-location-input" name="location" class="full-input" placeholder="Ej. Sala, Dormitorio, Estudio" enterkeyhint="next">
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="edit-admin-url-input">URL de administración</label>
+              <input type="url" id="edit-admin-url-input" name="admin_url" class="full-input" placeholder="http://192.168.1.1" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="next">
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="edit-fieldset">
+          <legend>Acceso y credenciales (guardado solo en tu SQLite local)</legend>
+          <div class="form-grid">
+            <div class="field-group">
+              <label class="field-label" for="edit-admin-user-input">Usuario de acceso</label>
+              <input type="text" id="edit-admin-user-input" name="admin_user" class="full-input" placeholder="Ej. admin, root" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="next">
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="edit-admin-pass-input">Contraseña</label>
+              <div class="password-field-wrap">
+                <input type="password" id="edit-admin-pass-input" name="admin_password" class="full-input" placeholder="Contraseña del router/NAS/cámara" autocomplete="new-password" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="next">
+                <button type="button" id="btn-toggle-edit-pass" class="secondary-btn" aria-pressed="false" aria-label="Mostrar contraseña" aria-describedby="edit-pw-warning">Ver</button>
+              </div>
+              <span id="edit-pw-warning" class="sr-only">Atención: esto mostrará la contraseña en pantalla.</span>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="edit-comments-input">Comentarios / Notas</label>
+            <textarea id="edit-comments-input" name="comments" class="full-textarea" rows="2" placeholder="Notas adicionales, SSID, puertos reenviados, etc."></textarea>
+          </div>
+        </fieldset>
+      </div>
+      <div class="dialog-footer">
+        <button type="button" command="close" commandfor="edit-hostname-dialog" class="secondary-btn">Cancelar</button>
+        <button type="submit" value="save" class="action-btn">Guardar cambios</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Clear Results Confirmation Dialog -->
+  <dialog id="clear-dialog" closedby="any" aria-labelledby="clear-dialog-title">
+    <div class="dialog-header">
+      <h2 id="clear-dialog-title">¿Limpiar resultados?</h2>
+    </div>
+    <div class="dialog-body">
+      <p>Se eliminarán los equipos almacenados en la vista actual (incluyendo nombres personalizados y resultados de puertos). Tus redes configuradas se mantendrán intactas.</p>
+    </div>
+    <div class="dialog-footer">
+      <form method="dialog" class="dialog-actions-row">
+        <button value="cancel" class="secondary-btn" autofocus>Cancelar</button>
+        <button value="confirm" class="danger-btn">Limpiar todo</button>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- Custom Ports Modal Dialog -->
+  <dialog id="custom-ports-dialog" closedby="any" aria-labelledby="custom-ports-title">
+    <div class="dialog-header">
+      <h2 id="custom-ports-title">Escaneo de puertos personalizado</h2>
+      <button type="button" class="icon-close" command="close" commandfor="custom-ports-dialog" aria-label="Cerrar">&times;</button>
+    </div>
+    <form method="dialog" id="custom-ports-form">
+      <div class="dialog-body">
+        <p class="help-text">Especifica puertos individuales o rangos separados por comas:</p>
+        <label class="field-label" for="custom-ports-input">Puertos TCP</label>
+        <input type="text" id="custom-ports-input" class="full-input" value="22,80,443,445,3306,8000-8100,9000-9200" autofocus>
+      </div>
+      <div class="dialog-footer">
+        <button value="cancel" class="secondary-btn">Cancelar</button>
+        <button value="scan" class="action-btn">Iniciar Port Scan</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
