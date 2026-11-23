@@ -7,6 +7,7 @@ import csv
 import io
 import json
 import os
+import sys
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
@@ -17,9 +18,12 @@ from pydantic import BaseModel
 from . import advisor, db, enrichment
 from .scanner import deep_enrich_device, lookup_vendor, normalize_mac, scan_host_ports, scan_manager
 
-app = FastAPI(title="LanScan Web", version="1.0.0")
+app = FastAPI(title="LanScan Web", version="1.2.0")
 
-STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    STATIC_DIR = os.path.join(sys._MEIPASS, "app", "static")
+else:
+    STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
 @app.on_event("startup")

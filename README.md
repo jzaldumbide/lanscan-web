@@ -1,13 +1,15 @@
-# LanScan Web — Multi-Subnet Network Scanner, Topology Diagram & Port Scanner in Docker
+# LanScan Web — Multi-Subnet Network Scanner, Topology Diagram & Port Scanner
 
 **English** | [Español](./README.es.md)
 
+![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-000000?logo=apple&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078D6?logo=windows&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Python%203.12-009688?logo=fastapi&logoColor=white)
 ![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-A self-hosted web application inspired by **LanScan**, built to discover, inventory, visualize, and audit devices across home or office networks — including **multi-subnet setups and cascaded routers** (e.g., `192.168.1.0/24` + `192.168.2.0/24`) — with zero paywalls or cloud dependencies.
+A native desktop (**macOS / iMac** & **Windows**) and self-hosted **Docker** application inspired by **LanScan**, built to discover, inventory, visualize, and audit devices across home or office networks — including **multi-subnet setups and cascaded routers** (e.g., `192.168.1.0/24` + `192.168.2.0/24`) — with zero paywalls or cloud dependencies.
 
 ---
 
@@ -58,6 +60,48 @@ flowchart LR
     Scanner --> DB
     Enrich --> DB
     Nmap --> DB
+```
+
+---
+
+## Native Desktop Apps (macOS / iMac & Windows — Recommended)
+
+Run **LanScan Web** directly on your Mac or PC without Docker or external tools (`nmap` / `nmblookup` are **not** required). Native desktop builds read your OS Layer-2 ARP table directly for instant **MAC addresses, IEEE OUI vendors (46,000+ bundled offline), and Bonjour/mDNS hostnames**.
+
+### Download Pre-Built Releases
+
+Grab the latest installer from [**GitHub Releases**](https://github.com/jzaldumbide/lanscan-web/releases):
+
+- **macOS (Apple Silicon — M1/M2/M3/M4 iMac & MacBook):** `LanScan-Web-macOS-arm64.dmg`
+- **macOS (Intel iMac & MacBook):** `LanScan-Web-macOS-x64.dmg`
+- **Windows 10 / 11 (64-bit):** `LanScan-Web-Windows-x64.exe` (or `.zip`)
+
+> **First-launch note (unsigned community builds):**
+> - **macOS:** Right-click `LanScan Web.app` → **Open** the first time to allow it past Gatekeeper, and approve the **Local Network** permission prompt so it can scan your LAN.
+> - **Windows:** Click **More info → Run anyway** on Windows SmartScreen, and allow Private Network access if Windows Firewall prompts.
+> - **Local SQLite database path:** `~/Library/Application Support/LanScanWeb/lanscan.db` (macOS) · `%APPDATA%\LanScanWeb\lanscan.db` (Windows).
+
+### Run or Build Locally from Source
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -r requirements-desktop.txt
+
+# Run natively in a desktop window
+python desktop.py
+
+# Or package a local .dmg (macOS) / .exe + .zip (Windows)
+python build_desktop.py
+```
+
+### Automated Releases via GitHub Actions
+
+Pushing a semantic version tag automatically builds macOS (`arm64` + Intel `x64`) and Windows (`x64`) bundles and publishes them to GitHub Releases:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 ---
@@ -153,25 +197,34 @@ With `network_mode: host`, the container gains **native Layer-2 ARP, SSDP, and m
 
 ```text
 lanscan-web/
+├── .github/workflows/
+│   └── release.yml         # Automated macOS (arm64/x64) & Windows (x64) releases
+├── desktop.py              # Native desktop launcher (FastAPI + pywebview)
+├── build_desktop.py        # PyInstaller packager (.dmg / .exe / .zip)
+├── requirements-desktop.txt
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
 ├── LICENSE
-├── README.md            # English documentation
-├── README.es.md         # Documentación en español
+├── README.md               # English documentation
+├── README.es.md            # Documentación en español
 ├── scripts/
 │   └── macos-arp-sync.sh
 └── app/
-    ├── main.py          # FastAPI REST API + SSE + static assets
-    ├── db.py            # SQLite persistence (subnets, devices, OUI cache)
-    ├── scanner.py       # Multi-subnet discovery engine & nmap port scanner
-    ├── enrichment.py    # Brand intelligence, TLS, SNMP, online OUI & topology
+    ├── main.py             # FastAPI REST API + SSE + static assets
+    ├── db.py               # Cross-platform SQLite persistence
+    ├── scanner.py          # Multi-subnet discovery, pure-Python & nmap port scanner
+    ├── enrichment.py       # Brand intelligence, TLS, SNMP, online OUI & topology
+    ├── advisor.py          # Automated network architecture & security audit
+    ├── data/
+    │   └── nmap-mac-prefixes  # Bundled IEEE OUI database (offline vendor lookup)
     └── static/
-        ├── index.html   # Web UI (Table, SVG Topology, Inspector, Modals)
-        ├── styles.css   # Native light-dark() & container-query styling
-        └── app.js       # Reactive UI, interactive SVG map & SSE client
+        ├── index.html      # Web UI (Table, SVG Topology, Audit, Inspector, Modals)
+        ├── styles.css      # Native light-dark() & container-query styling
+        ├── i18n.js         # English & Spanish UI localization
+        └── app.js          # Reactive UI, interactive SVG map & SSE client
 ```
 
 ---

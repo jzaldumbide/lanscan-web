@@ -1,5 +1,5 @@
 # Local database & persisted credentials (NEVER commit to GitHub!)
-data/
+/data/
 *.db
 *.db-wal
 *.db-shm
@@ -9,12 +9,17 @@ data/
 .env
 .env.local
 
-# Python
+# Python & PyInstaller desktop builds
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
+build/
+dist/
+*.spec
+*.dmg
+*.exe
 
 # OS & editor files
 .DS_Store

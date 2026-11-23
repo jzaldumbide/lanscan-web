@@ -1,0 +1,90 @@
+name: Build Desktop Releases (macOS & Windows)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag name (e.g. v1.0.0)"
+        required: false
+        default: "v1.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS Apple Silicon (arm64)
+            os: macos-14
+            artifact_glob: dist/LanScan-Web-macOS-*.dmg
+          - label: macOS Intel (x64 / iMac)
+            os: macos-15-intel
+            artifact_glob: dist/LanScan-Web-macOS-*.dmg
+          - label: Windows (x64)
+            os: windows-latest
+            artifact_glob: dist/LanScan-Web-Windows-*
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements-desktop.txt
+
+      - name: Install desktop build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-desktop.txt
+
+      - name: Build native desktop bundle
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+        run: python build_desktop.py
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## LanScan Web — Native Desktop Releases (macOS & Windows)
+
+            Run **LanScan Web** natively without Docker — with direct Layer-2 MAC/ARP, mDNS/Bonjour, multi-subnet scanning, illustrated topology diagram, and built-in TCP port scanning (no `nmap` installation required).
+
+            ### Downloads
+            - **macOS (Apple Silicon — M1/M2/M3/M4 iMac & MacBook):** `LanScan-Web-macOS-arm64.dmg`
+            - **macOS (Intel iMac & MacBook):** `LanScan-Web-macOS-x64.dmg`
+            - **Windows 10 / 11 (64-bit):** `LanScan-Web-Windows-x64.exe` (or `.zip`)
+
+            > **Note on unsigned builds:** On macOS, right-click the app → **Open** the first time to allow it past Gatekeeper, and grant **Local Network** access when prompted. On Windows, click **More info → Run anyway** on SmartScreen.
+          files: artifacts/*

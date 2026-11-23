@@ -6,10 +6,14 @@ import concurrent.futures
 import ipaddress
 import json
 import os
+import platform
 import re
+import shutil
 import socket
 import ssl
+import struct
 import subprocess
+import sys
 import threading
 import time
 import urllib.request
@@ -17,6 +21,14 @@ import xml.etree.ElementTree as ET
 from typing import Any, Callable
 
 from . import db, enrichment
+
+IS_WINDOWS = platform.system() == "Windows"
+IS_MACOS = platform.system() == "Darwin"
+SUBPROC_KWARGS: dict[str, Any] = (
+    {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
+    if IS_WINDOWS
+    else {}
+)
 
 # Supplemental OUI overrides for newer devices & home networking hardware
 EXTRA_OUIS: dict[str, str] = {
@@ -62,7 +74,14 @@ def _load_oui_db() -> dict[str, str]:
         if _oui_cache is not None:
             return _oui_cache
         table: dict[str, str] = {}
+        base_dir = (
+            os.path.join(sys._MEIPASS, "app")
+            if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS")
+            else os.path.dirname(__file__)
+        )
+        bundled_oui = os.path.join(base_dir, "data", "nmap-mac-prefixes")
         for path in (
+            bundled_oui,
             "/usr/share/nmap/nmap-mac-prefixes",
             "/usr/share/arp-scan/ieee-oui.txt",
         ):
@@ -170,14 +189,62 @@ def ssdp_discover(timeout: float = 2.0) -> dict[str, dict[str, str]]:
     return found
 
 
-def probe_netbios(ip: str) -> dict[str, str]:
-    """Query NetBIOS/SMB name, domain/workgroup, and MAC via UDP 137 (works across subnets!)."""
+def _probe_netbios_udp_pure(ip: str) -> dict[str, str]:
+    """Pure-Python RFC 1002 NetBIOS NBSTAT query (UDP 137) — works on macOS, Windows & Linux."""
     res = {"smb_name": "", "smb_domain": "", "mac": ""}
+    # Standard wildcard NBSTAT request: TXID=0x1337, flags=0, QDCOUNT=1, name="*" encoded
+    query = (
+        b"\x13\x37\x00\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+        b"\x20CKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\x00"
+        b"\x00\x21\x00\x01"
+    )
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(0.8)
+    try:
+        sock.sendto(query, (ip, 137))
+        data, _ = sock.recvfrom(1024)
+        if len(data) < 57:
+            return res
+        num_names = data[56]
+        offset = 57
+        for _ in range(num_names):
+            if offset + 18 > len(data):
+                break
+            raw_name = data[offset : offset + 15].decode("ascii", errors="ignore").strip()
+            suffix = data[offset + 15]
+            flags = struct.unpack("!H", data[offset + 16 : offset + 18])[0]
+            is_group = bool(flags & 0x8000)
+            offset += 18
+            if not raw_name or raw_name.startswith("__"):
+                continue
+            if suffix in (0x00, 0x20) and not is_group and not res["smb_name"]:
+                res["smb_name"] = raw_name
+            elif suffix == 0x00 and is_group and not res["smb_domain"]:
+                res["smb_domain"] = raw_name
+        if offset + 6 <= len(data):
+            mac_bytes = data[offset : offset + 6]
+            mac_str = ":".join(f"{b:02x}" for b in mac_bytes)
+            res["mac"] = normalize_mac(mac_str)
+    except Exception:
+        pass
+    finally:
+        sock.close()
+    return res
+
+
+def probe_netbios(ip: str) -> dict[str, str]:
+    """Query NetBIOS/SMB name, domain/workgroup, and MAC via UDP 137 (pure Python, zero deps)."""
+    res = _probe_netbios_udp_pure(ip)
+    if res["smb_name"] or res["mac"]:
+        return res
+    if not shutil.which("nmblookup"):
+        return res
     try:
         out = subprocess.check_output(
             ["nmblookup", "-A", ip],
             stderr=subprocess.DEVNULL,
-            timeout=2.0,
+            timeout=1.8,
+            **SUBPROC_KWARGS,
         ).decode("utf-8", errors="ignore")
     except Exception:
         return res
@@ -192,9 +259,7 @@ def probe_netbios(ip: str) -> dict[str, str]:
             name, code, is_group = m_entry.group(1), m_entry.group(2).upper(), bool(m_entry.group(3))
             if name.startswith("__"):
                 continue
-            if code == "00" and not is_group and not res["smb_name"]:
-                res["smb_name"] = name
-            elif code == "20" and not is_group and not res["smb_name"]:
+            if code in ("00", "20") and not is_group and not res["smb_name"]:
                 res["smb_name"] = name
             elif code == "00" and is_group and not res["smb_domain"]:
                 res["smb_domain"] = name
@@ -204,7 +269,7 @@ def probe_netbios(ip: str) -> dict[str, str]:
 def probe_reverse_dns(ip: str) -> str:
     try:
         old = socket.getdefaulttimeout()
-        socket.setdefaulttimeout(1.2)
+        socket.setdefaulttimeout(1.0)
         try:
             host, _, _ = socket.gethostbyaddr(ip)
             if host and host != ip:
@@ -217,16 +282,42 @@ def probe_reverse_dns(ip: str) -> str:
 
 
 def probe_mdns(ip: str) -> str:
-    try:
-        out = subprocess.check_output(
-            ["avahi-resolve-address", ip],
-            stderr=subprocess.DEVNULL,
-            timeout=1.5,
-        ).decode("utf-8", errors="ignore").strip()
-        if out and "\t" in out:
-            return out.split("\t", 1)[1].strip()
-    except Exception:
-        pass
+    if IS_MACOS:
+        try:
+            # Check if this is the local Mac itself
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                s.connect((ip, 9))
+                local_ip = s.getsockname()[0]
+            finally:
+                s.close()
+            if local_ip == ip:
+                hn = subprocess.check_output(
+                    ["scutil", "--get", "LocalHostName"],
+                    stderr=subprocess.DEVNULL,
+                    timeout=1.0,
+                ).decode("utf-8", errors="ignore").strip()
+                if hn:
+                    return hn if hn.endswith(".local") else f"{hn}.local"
+        except Exception:
+            pass
+    if shutil.which("avahi-resolve-address"):
+        try:
+            out = subprocess.check_output(
+                ["avahi-resolve-address", ip],
+                stderr=subprocess.DEVNULL,
+                timeout=1.2,
+                **SUBPROC_KWARGS,
+            ).decode("utf-8", errors="ignore").strip()
+            if out and "\t" in out:
+                return out.split("\t", 1)[1].strip()
+        except Exception:
+            pass
+    # On macOS & Windows, gethostbyaddr natively queries Bonjour/mDNS and LLMNR
+    if IS_MACOS or IS_WINDOWS:
+        hn = probe_reverse_dns(ip)
+        if hn.endswith(".local"):
+            return hn
     return ""
 
 
@@ -312,42 +403,77 @@ def probe_device_identification(ip: str) -> dict[str, str]:
 
 
 def read_local_arp_table() -> dict[str, str]:
-    """Read kernel ARP table (/proc/net/arp) when running on Linux host network."""
+    """Cross-platform native ARP table reader (Linux /proc/net/arp, macOS arp -an, Windows arp -a)."""
     table: dict[str, str] = {}
-    if not os.path.exists("/proc/net/arp"):
+    if os.path.exists("/proc/net/arp"):
+        try:
+            with open("/proc/net/arp", "r", encoding="utf-8", errors="ignore") as f:
+                for line in f.readlines()[1:]:
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        mac = normalize_mac(parts[3])
+                        if mac:
+                            table[parts[0]] = mac
+        except Exception:
+            pass
         return table
-    try:
-        with open("/proc/net/arp", "r", encoding="utf-8", errors="ignore") as f:
-            for line in f.readlines()[1:]:
-                parts = line.split()
-                if len(parts) >= 4:
-                    ip = parts[0]
-                    mac = normalize_mac(parts[3])
+
+    if IS_MACOS:
+        try:
+            out = subprocess.check_output(
+                ["arp", "-an"], stderr=subprocess.DEVNULL, timeout=3.0
+            ).decode("utf-8", errors="ignore")
+            for line in out.splitlines():
+                m = re.search(r"\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F:]+)", line)
+                if m:
+                    mac = normalize_mac(m.group(2))
                     if mac:
-                        table[ip] = mac
-    except Exception:
-        pass
+                        table[m.group(1)] = mac
+        except Exception:
+            pass
+        return table
+
+    if IS_WINDOWS:
+        try:
+            out = subprocess.check_output(
+                ["arp", "-a"], stderr=subprocess.DEVNULL, timeout=3.0, **SUBPROC_KWARGS
+            ).decode("utf-8", errors="ignore")
+            for line in out.splitlines():
+                m = re.search(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F]{2}(?:-[0-9a-fA-F]{2}){5})", line)
+                if m:
+                    mac = normalize_mac(m.group(2))
+                    if mac:
+                        table[m.group(1)] = mac
+        except Exception:
+            pass
     return table
 
 
 def _probe_single_host_alive(ip: str, stop_event: threading.Event) -> dict[str, Any] | None:
-    """Zero-false-positive liveness check (safe under Docker Desktop macOS NAT & Linux).
-
-    Accepts ONLY genuine ICMP echo-reply or completed TCP handshake (never TCP RST).
-    """
+    """Zero-false-positive cross-platform liveness check (macOS, Windows, Linux & Docker NAT)."""
     if stop_event.is_set():
         return None
 
-    # 1. ICMP Echo Request (fast, clean, never produces false positives in Docker NAT)
+    # 1. Cross-platform ICMP Echo Request
+    if IS_WINDOWS:
+        ping_cmd = ["ping", "-n", "1", "-w", "750", ip]
+    elif IS_MACOS:
+        ping_cmd = ["ping", "-c", "1", "-W", "750", ip]
+    else:
+        ping_cmd = ["ping", "-c", "1", "-W", "1", ip]
+
     try:
         out = subprocess.check_output(
-            ["ping", "-c", "1", "-W", "1", ip],
+            ping_cmd,
             stderr=subprocess.DEVNULL,
-            timeout=1.6,
+            timeout=1.8,
+            **SUBPROC_KWARGS,
         ).decode("utf-8", errors="ignore")
-        m_rtt = re.search(r"time[=<]\s*([0-9.]+)\s*ms", out)
-        ping_ms = round(float(m_rtt.group(1)), 2) if m_rtt else 1.0
-        return {"ipv4": ip, "ipv6": "", "mac": "", "vendor": "", "dns_name": "", "ping_ms": ping_ms}
+        # Support English (time=...) and Spanish/localized Windows (tiempo=...)
+        m_rtt = re.search(r"(?:time|tiempo|temps|zeit)[=<]\s*([0-9.]+)\s*ms", out, re.I)
+        if m_rtt or "ttl=" in out.lower():
+            ping_ms = round(float(m_rtt.group(1)), 2) if m_rtt else 1.0
+            return {"ipv4": ip, "ipv6": "", "mac": "", "vendor": "", "dns_name": "", "ping_ms": ping_ms}
     except Exception:
         pass
 
@@ -371,8 +497,10 @@ def _probe_single_host_alive(ip: str, stop_event: threading.Event) -> dict[str, 
 
 
 def _arp_discover_local_l2(cidr: str) -> dict[str, str]:
-    """Run L2 ARP discovery if the container is directly attached to this subnet (Linux/QNAP host mode)."""
+    """Run L2 ARP discovery on Linux host mode (when nmap + ip are installed)."""
     found: dict[str, str] = {}
+    if IS_WINDOWS or IS_MACOS or not shutil.which("ip") or not shutil.which("nmap"):
+        return found
     try:
         net = ipaddress.ip_network(cidr, strict=False)
         out = subprocess.check_output(["ip", "-o", "-4", "addr", "show"], stderr=subprocess.DEVNULL, timeout=2).decode("utf-8", errors="ignore")
@@ -457,30 +585,143 @@ def _nmap_discover_subnet(cidr: str, stop_event: threading.Event) -> list[dict[s
     return list(hosts_by_ip.values())
 
 
+COMMON_SERVICES: dict[int, str] = {
+    21: "ftp", 22: "ssh", 23: "telnet", 25: "smtp", 53: "dns", 80: "http",
+    110: "pop3", 111: "rpcbind", 123: "ntp", 135: "msrpc", 139: "netbios-ssn",
+    143: "imap", 161: "snmp", 443: "https", 445: "smb", 515: "printer",
+    548: "afp", 554: "rtsp", 631: "ipp", 993: "imaps", 995: "pop3s",
+    1433: "mssql", 1883: "mqtt", 2049: "nfs", 3000: "http", 3306: "mysql",
+    3389: "rdp", 5000: "upnp/http", 5353: "mdns", 5432: "postgresql",
+    5900: "vnc", 6379: "redis", 7000: "airplay", 7676: "samsung-upnp",
+    7678: "samsung-upnp", 8000: "http-alt", 8001: "samsung-tv",
+    8002: "samsung-tv-tls", 8008: "chromecast", 8080: "http-proxy",
+    8081: "http-alt", 8096: "jellyfin", 8123: "home-assistant", 8200: "dlna/upnp",
+    8443: "https-alt", 8787: "lanscan-web", 8888: "http-alt", 9000: "http-alt",
+    9090: "web-admin", 9100: "jetdirect", 9197: "samsung-dlna", 27017: "mongodb",
+    32400: "plex", 49152: "upnp", 62078: "iphone-sync",
+}
+
+
+def _expand_port_list(spec: str) -> list[int]:
+    ports: set[int] = set()
+    for token in spec.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        if "-" in token:
+            a, b = token.split("-", 1)
+            lo, hi = max(1, int(a)), min(65535, int(b))
+            if lo <= hi:
+                ports.update(range(lo, hi + 1))
+        else:
+            p = int(token)
+            if 1 <= p <= 65535:
+                ports.add(p)
+    return sorted(ports)
+
+
+def _grab_tcp_banner(ip: str, port: int) -> str:
+    try:
+        with socket.create_connection((ip, port), timeout=0.6) as s:
+            s.settimeout(0.5)
+            if port in (80, 8080, 8081, 8096, 8000, 8001, 8123, 8787, 9000, 3000, 32400):
+                s.sendall(f"HEAD / HTTP/1.0\r\nHost: {ip}\r\n\r\n".encode())
+            data = s.recv(512).decode("utf-8", errors="ignore").strip()
+            if not data:
+                return ""
+            for line in data.splitlines():
+                if line.lower().startswith("server:"):
+                    return line.split(":", 1)[1].strip()[:80]
+            first = re.sub(r"[\r\n\t]+", " ", data.splitlines()[0]).strip()
+            return first[:80]
+    except Exception:
+        return ""
+
+
+def _python_scan_ports(ipv4: str, port_list: list[int]) -> list[dict[str, Any]]:
+    """Pure-Python concurrent TCP port scanner (zero external dependencies for macOS/Windows)."""
+    open_nums: list[int] = []
+
+    def check_one(p: int) -> int | None:
+        try:
+            with socket.create_connection((ipv4, p), timeout=0.35):
+                return p
+        except Exception:
+            return None
+
+    workers = min(128, max(16, len(port_list)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        for res in pool.map(check_one, port_list):
+            if res is not None:
+                open_nums.append(res)
+
+    ports: list[dict[str, Any]] = []
+    for port_num in sorted(open_nums):
+        service = COMMON_SERVICES.get(port_num)
+        if not service:
+            try:
+                service = socket.getservbyport(port_num, "tcp")
+            except Exception:
+                service = ""
+        banner = _grab_tcp_banner(ipv4, port_num)
+        is_https = port_num in (443, 8443, 8002) or "https" in service
+        is_http = is_https or port_num in (80, 8080, 8081, 8096, 8000, 8123, 8787, 8888, 9000, 32400) or "http" in service
+        web_url = f"{'https' if is_https else 'http'}://{ipv4}:{port_num}" if is_http else ""
+        ports.append(
+            {
+                "port": port_num,
+                "protocol": "tcp",
+                "state": "open",
+                "service": service,
+                "product": banner,
+                "version": "",
+                "extrainfo": "",
+                "web_url": web_url,
+            }
+        )
+    return ports
+
+
 def scan_host_ports(
     ipv4: str,
     mode: str = "quick",
     custom_ports: str = "",
 ) -> dict[str, Any]:
-    """Run an nmap TCP port + service version scan against a single IPv4 host."""
+    """Run TCP port + service scan using nmap if installed, or pure-Python scanner on desktop."""
     ipaddress.IPv4Address(ipv4)  # validate IP
 
-    extra_home_ports = "21,22,23,53,80,111,139,443,445,515,548,554,631,1883,3000,3306,3389,5000,5353,5432,6379,7000,7676,7678,8000,8001,8002,8008,8080,8081,8096,8123,8200,8443,8787,8888,9000,9090,9100,9197,32400,62078"
+    extra_home_ports = "21,22,23,53,80,111,135,139,443,445,515,548,554,631,1433,1883,2049,3000,3306,3389,5000,5353,5432,5900,6379,7000,7676,7678,8000,8001,8002,8008,8080,8081,8096,8123,8200,8443,8787,8888,9000,9090,9100,9197,27017,32400,49152,62078"
 
     if mode == "custom" and custom_ports.strip():
         cleaned = re.sub(r"\s+", "", custom_ports)
         if not re.fullmatch(r"[0-9,\-]+", cleaned):
-            raise ValueError("Formato de puertos inválido. Usa por ejemplo: 22,80,443,8000-8100")
+            raise ValueError("Invalid port specification. Example: 22,80,443,8000-8100")
         port_args = ["-p", cleaned]
+        py_ports = _expand_port_list(cleaned)
     elif mode == "common":
         port_args = ["--top-ports", "1000"]
+        py_ports = sorted(set(range(1, 1025)) | set(_expand_port_list(extra_home_ports)))
     elif mode == "full":
         port_args = ["-p", "1-65535", "--min-rate", "600"]
+        py_ports = list(range(1, 65536))
     else:
-        # quick: top 100 + common home/NAS/TV/Docker ports
         port_args = ["-p", extra_home_ports]
+        py_ports = _expand_port_list(extra_home_ports)
 
-    # Stage 1: reliable TCP connect scan to find open ports quickly
+    # Pure-Python fallback when nmap is not installed (standalone macOS / Windows desktop builds)
+    if not shutil.which("nmap"):
+        ports = _python_scan_ports(ipv4, py_ports)
+        ident = None
+        if ports:
+            fp = enrichment.deep_probe_device(ipv4)
+            ident = fp.get("identification") or None
+        updated = db.update_device_ports(ipv4, ports, identification=ident)
+        if updated:
+            dtype, extra = enrichment.classify_and_enrich(updated, updated.get("extra"))
+            updated = db.update_device_enrichment(ipv4, dtype, extra) or updated
+        return {"ipv4": ipv4, "ports": ports, "device": updated}
+
+    # Stage 1: reliable TCP connect scan via nmap
     stage1_cmd = [
         "nmap",
         "-Pn",
@@ -492,7 +733,7 @@ def scan_host_ports(
         "-oX", "-",
         ipv4,
     ]
-    out1 = subprocess.check_output(stage1_cmd, stderr=subprocess.DEVNULL, timeout=260).decode("utf-8", errors="ignore")
+    out1 = subprocess.check_output(stage1_cmd, stderr=subprocess.DEVNULL, timeout=260, **SUBPROC_KWARGS).decode("utf-8", errors="ignore")
     open_port_nums: list[int] = []
     try:
         r1 = ET.fromstring(out1)
@@ -521,7 +762,7 @@ def scan_host_ports(
                 "-oX", "-",
                 ipv4,
             ]
-            out = subprocess.check_output(stage2_cmd, stderr=subprocess.DEVNULL, timeout=55).decode("utf-8", errors="ignore")
+            out = subprocess.check_output(stage2_cmd, stderr=subprocess.DEVNULL, timeout=55, **SUBPROC_KWARGS).decode("utf-8", errors="ignore")
         except Exception:
             out = out1
     ports: list[dict[str, Any]] = []

@@ -1,13 +1,15 @@
-# LanScan Web — Escáner Multi-Red, Topología y Puertos en Docker
+# LanScan Web — Escáner Multi-Red, Topología y Puertos (macOS, Windows & Docker)
 
 [English](./README.md) | **Español**
 
+![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon%20%7C%20Intel-000000?logo=apple&logoColor=white)
+![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0078D6?logo=windows&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Python%203.12-009688?logo=fastapi&logoColor=white)
 ![SQLite](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
-Aplicación web self-hosted inspirada en **LanScan**, diseñada para descubrir, inventariar, visualizar y auditar todos los equipos de tu red doméstica o de oficina — incluyendo hogares con **múltiples subredes y routers en cascada** (por ejemplo `192.168.1.0/24` + `192.168.2.0/24`), sin límites de pago ni dependencias en la nube.
+Aplicación de escritorio nativa (**macOS / iMac** y **Windows**) y web en **Docker** inspirada en **LanScan**, diseñada para descubrir, inventariar, visualizar y auditar todos los equipos de tu red doméstica o de oficina — incluyendo hogares con **múltiples subredes y routers en cascada** (por ejemplo `192.168.1.0/24` + `192.168.2.0/24`), sin límites de pago ni dependencias en la nube.
 
 ---
 
@@ -58,6 +60,48 @@ flowchart LR
     Scanner --> DB
     Enrich --> DB
     Nmap --> DB
+```
+
+---
+
+## Aplicaciones Nativas de Escritorio (macOS / iMac y Windows — Recomendado)
+
+Ejecuta **LanScan Web** directamente en tu Mac o PC sin instalar Docker ni herramientas externas (`nmap` / `nmblookup` **no** son obligatorios). La versión nativa lee directamente la tabla ARP Capa 2 de tu sistema operativo para obtener al instante **direcciones MAC, fabricantes IEEE OUI (más de 46,000 incluidos offline) y nombres Bonjour/mDNS**.
+
+### Descargar Releases Precompilados
+
+Descarga el instalador correspondiente desde [**GitHub Releases**](https://github.com/jzaldumbide/lanscan-web/releases):
+
+- **macOS (Apple Silicon — iMac y MacBook M1/M2/M3/M4):** `LanScan-Web-macOS-arm64.dmg`
+- **macOS (iMac y MacBook Intel):** `LanScan-Web-macOS-x64.dmg`
+- **Windows 10 / 11 (64 bits):** `LanScan-Web-Windows-x64.exe` (o `.zip`)
+
+> **Nota para el primer arranque (compilaciones abiertas sin certificado de pago):**
+> - **macOS:** Haz clic derecho en `LanScan Web.app` → **Abrir** la primera vez para autorizarla en Gatekeeper, y acepta el permiso de **Red local** cuando macOS lo solicite.
+> - **Windows:** En SmartScreen pulsa **Más información → Ejecutar de todas formas** y permite el acceso en red privada si el Firewall de Windows pregunta.
+> - **Ruta de tu base de datos SQLite local:** `~/Library/Application Support/LanScanWeb/lanscan.db` (macOS) · `%APPDATA%\LanScanWeb\lanscan.db` (Windows).
+
+### Ejecutar o Compilar Localmente desde el Código
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate      # Windows: .venv\Scripts\activate
+pip install -r requirements-desktop.txt
+
+# Abrir directamente como aplicación nativa
+python desktop.py
+
+# O empaquetar localmente un .dmg (macOS) / .exe + .zip (Windows)
+python build_desktop.py
+```
+
+### Releases Automáticos con GitHub Actions
+
+Al publicar una etiqueta de versión (`v*`), GitHub Actions compila automáticamente los instaladores de macOS (`arm64` + Intel `x64`) y Windows (`x64`) y los adjunta a GitHub Releases:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
 ---
@@ -153,25 +197,34 @@ En modo `host`, el contenedor obtiene **ARP capa 2, SSDP y mDNS de forma 100% na
 
 ```text
 lanscan-web/
+├── .github/workflows/
+│   └── release.yml         # Releases automáticos macOS (arm64/x64) y Windows (x64)
+├── desktop.py              # Lanzador nativo de escritorio (FastAPI + pywebview)
+├── build_desktop.py        # Empaquetador PyInstaller (.dmg / .exe / .zip)
+├── requirements-desktop.txt
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
 ├── LICENSE
-├── README.md            # English documentation
-├── README.es.md         # Documentación en español
+├── README.md               # English documentation
+├── README.es.md            # Documentación en español
 ├── scripts/
 │   └── macos-arp-sync.sh
 └── app/
-    ├── main.py          # API FastAPI + SSE + estáticos
-    ├── db.py            # Persistencia SQLite (subredes, equipos, caché OUI)
-    ├── scanner.py       # Motor de descubrimiento multi-red y escáner nmap
-    ├── enrichment.py    # Inteligencia por marca, TLS, SNMP, OUI online y topología
+    ├── main.py             # API FastAPI + SSE + estáticos
+    ├── db.py               # Persistencia SQLite multiplataforma
+    ├── scanner.py          # Descubrimiento multi-red, port scanner Python y nmap
+    ├── enrichment.py       # Inteligencia por marca, TLS, SNMP, OUI online y topología
+    ├── advisor.py          # Auditoría automática de arquitectura y seguridad
+    ├── data/
+    │   └── nmap-mac-prefixes  # Base local IEEE OUI integrada (fabricantes offline)
     └── static/
-        ├── index.html   # Interfaz web (Tabla, Diagrama SVG, Inspector, Modales)
-        ├── styles.css   # Estilos nativos con light-dark() y container queries
-        └── app.js       # Lógica reactiva, diagrama interactivo y SSE
+        ├── index.html      # Interfaz web (Tabla, Diagrama SVG, Auditoría, Inspector)
+        ├── styles.css      # Estilos nativos con light-dark() y container queries
+        ├── i18n.js         # Traducción Inglés y Español
+        └── app.js          # Lógica reactiva, diagrama interactivo y SSE
 ```
 
 ---

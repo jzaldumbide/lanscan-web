@@ -5,12 +5,49 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import platform
+import socket
 import sqlite3
 import threading
 from datetime import datetime, timezone
 from typing import Any
 
-DB_PATH = os.environ.get("LANSCAN_DB", "/data/lanscan.db")
+
+def _default_db_path() -> str:
+    env_path = os.environ.get("LANSCAN_DB")
+    if env_path:
+        return env_path
+    # Inside Docker container (/data exists and is writable)
+    if os.path.isdir("/data") and os.access("/data", os.W_OK):
+        return "/data/lanscan.db"
+    sys_name = platform.system()
+    if sys_name == "Darwin":
+        return os.path.expanduser("~/Library/Application Support/LanScanWeb/lanscan.db")
+    if sys_name == "Windows":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "LanScanWeb", "lanscan.db")
+    return os.path.expanduser("~/.local/share/lanscan-web/lanscan.db")
+
+
+def _detect_local_subnet() -> str:
+    """Detect the host machine's primary IPv4 /24 subnet for zero-config first run."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+        finally:
+            s.close()
+        ip_obj = ipaddress.IPv4Address(local_ip)
+        if ip_obj.is_private and not ip_obj.is_loopback:
+            net = ipaddress.ip_network(f"{local_ip}/24", strict=False)
+            return str(net)
+    except Exception:
+        pass
+    return "192.168.1.0/24"
+
+
+DB_PATH = _default_db_path()
 _lock = threading.Lock()
 
 
@@ -104,7 +141,7 @@ def init_db() -> None:
         if count == 0:
             raw_defaults = os.environ.get(
                 "DEFAULT_SUBNETS",
-                "Red Principal|192.168.1.0/24",
+                f"Local Network|{_detect_local_subnet()}",
             )
             palette = ["#2563eb", "#7c3aed", "#059669", "#d97706", "#db2777", "#0891b2"]
             now = _utc_now()
