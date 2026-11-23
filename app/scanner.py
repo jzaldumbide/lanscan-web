@@ -291,11 +291,11 @@ def probe_device_identification(ip: str) -> dict[str, str]:
             with socket.create_connection((ip, port), timeout=0.35):
                 body, headers = _http_get(f"{scheme}://{ip}:{port}/", timeout=1.2)
                 title_m = re.search(r"<title[^>]*>([^<]{2,80})</title>", body, re.I)
-                title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else ""
+                raw_title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else ""
+                title = raw_title if enrichment.is_useful_title(raw_title) else ""
                 server = headers.get("server", "").strip()
-                # Ignore generic uninformative titles
-                if title.lower() in ("index", "login", "document", "home", "404 not found", "403 forbidden", "redirect"):
-                    title = ""
+                if server.lower() in ("webserver", "http"):
+                    server = ""
                 if title and server and server.lower() not in title.lower():
                     result["identification"] = f"{title} [{server}]"
                     return result
@@ -702,14 +702,17 @@ class ScanManager:
                     nb = probe_netbios(ip)
                     if not mac and nb["mac"]:
                         mac = nb["mac"]
-                    fp = probe_device_identification(ip)
-                    if not mac and fp["mac"]:
-                        mac = fp["mac"]
+                    deep = enrichment.deep_probe_device(ip)
+                    if not mac and deep.get("mac"):
+                        mac = normalize_mac(deep["mac"])
 
                     vendor = host_info["vendor"] or lookup_vendor(mac)
+                    if mac and not vendor:
+                        vendor = enrichment.lookup_vendor_online(mac)
                     dns_name = host_info["dns_name"] or probe_reverse_dns(ip)
                     mdns_name = probe_mdns(ip)
-                    ident = fp["identification"] or ssdp_map.get(ip, {}).get("identification", "")
+                    raw_ident = deep.get("identification") or ssdp_map.get(ip, {}).get("identification", "")
+                    ident = raw_ident if enrichment.is_useful_title(raw_ident) else ""
 
                     saved = db.upsert_device(
                         {
@@ -727,24 +730,25 @@ class ScanManager:
                             "ping_ms": host_info["ping_ms"],
                         }
                     )
-                    if saved.get("mac") and not saved.get("vendor"):
-                        online_v = enrichment.lookup_vendor_online(saved["mac"])
-                        if online_v:
-                            saved["vendor"] = online_v
-                    dtype, extra = enrichment.classify_and_enrich(saved)
+                    dtype, extra = enrichment.classify_and_enrich(saved, deep)
+                    inferred_vendor = saved.get("vendor") or extra.get("brand") or None
+                    best_ident = ident or (
+                        f"{extra.get('brand', '')} {extra.get('model', '')}".strip()
+                        if extra.get("model")
+                        else (f"{extra.get('brand')} · {extra.get('category_label')}" if extra.get("brand") else None)
+                    )
                     saved = db.update_device_enrichment(
-                        ip, dtype, extra, vendor=saved.get("vendor") or None
+                        ip,
+                        dtype,
+                        extra,
+                        vendor=inferred_vendor,
+                        mac=mac or None,
+                        identification=best_ident,
                     ) or saved
-                    if auto_quick_ports and not self._stop_event.is_set():
-                        try:
-                            res = scan_host_ports(ip, mode="quick")
-                            if res.get("device"):
-                                saved = res["device"]
-                        except Exception:
-                            pass
                     return saved
 
                 done_count = 0
+                discovered_online_ips: list[str] = []
                 with concurrent.futures.ThreadPoolExecutor(max_workers=12) as pool:
                     futures = [pool.submit(enrich_one, h) for h in discovered]
                     for fut in concurrent.futures.as_completed(futures):
@@ -754,13 +758,16 @@ class ScanManager:
                             dev = fut.result()
                             done_count += 1
                             total_found += 1
-                            pct = int(((idx + (done_count / total_hosts)) / total_subnets) * 100)
+                            discovered_online_ips.append(dev["ipv4"])
+                            max_phase1 = 72 if auto_quick_ports else 98
+                            pct = int(((idx + (done_count / total_hosts)) / total_subnets) * max_phase1)
                             with self._lock:
                                 self.state.update(
                                     {
-                                        "progress": min(99, max(5, pct)),
+                                        "progress": min(max_phase1, max(5, pct)),
                                         "found_count": total_found,
-                                        "message": f"{sub['name']}: {done_count}/{len(discovered)} equipos identificados",
+                                        "phase": "discovery",
+                                        "message": f"{sub['name']}: {done_count}/{len(discovered)}",
                                     }
                                 )
                             self.emit("device", dev)
@@ -772,18 +779,110 @@ class ScanManager:
                     self.state["completed_subnets"] = idx + 1
                 self.emit("subnet_done", {"cidr": cidr, "seen": len(seen_ips)})
 
+            # Phase 2: Automatic post-discovery Quick Port Scan when enabled
+            if auto_quick_ports and not self._stop_event.is_set():
+                online_targets = [
+                    d["ipv4"]
+                    for d in db.list_devices()
+                    if d.get("is_online") and d.get("subnet_cidr") in {s["cidr"] for s in targets}
+                ]
+                self._run_bulk_ports_internal(online_targets, base_progress=72)
+
         finally:
             stopped = self._stop_event.is_set()
             with self._lock:
                 self.state.update(
                     {
                         "running": False,
+                        "phase": "idle",
                         "progress": 100 if not stopped else self.state["progress"],
                         "message": (
-                            f"Escaneo detenido ({total_found} equipos encontrados)"
+                            f"Stopped ({total_found} devices)"
                             if stopped
-                            else f"Escaneo completado: {total_found} equipos activos en {total_subnets} red(es)"
+                            else f"Completed: {total_found} online across {total_subnets} subnet(s)"
                         ),
+                    }
+                )
+            self.emit("scan_complete", dict(self.state))
+
+    def _run_bulk_ports_internal(self, target_ips: list[str], base_progress: int = 5) -> None:
+        if not target_ips:
+            return
+        total = len(target_ips)
+        done = 0
+        with self._lock:
+            self.state.update(
+                {
+                    "phase": "ports",
+                    "port_done": 0,
+                    "port_total": total,
+                    "progress": base_progress,
+                    "message": f"Port Scan: 0/{total}",
+                }
+            )
+        self.emit("status", dict(self.state))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+            futs = {pool.submit(scan_host_ports, ip, "quick"): ip for ip in target_ips}
+            for fut in concurrent.futures.as_completed(futs):
+                if self._stop_event.is_set():
+                    break
+                done += 1
+                try:
+                    res = fut.result()
+                    if res and res.get("device"):
+                        self.emit("device", res["device"])
+                except Exception:
+                    pass
+                pct = base_progress + int((done / max(1, total)) * (99 - base_progress))
+                with self._lock:
+                    self.state.update(
+                        {
+                            "phase": "ports",
+                            "port_done": done,
+                            "port_total": total,
+                            "progress": min(99, pct),
+                            "message": f"Port Scan: {done}/{total}",
+                        }
+                    )
+                self.emit("status", dict(self.state))
+
+    def start_bulk_port_scan(self) -> bool:
+        with self._lock:
+            if self.state["running"]:
+                return False
+            online_ips = [d["ipv4"] for d in db.list_devices() if d.get("is_online")]
+            if not online_ips:
+                return False
+            self._stop_event.clear()
+            self.state.update(
+                {
+                    "running": True,
+                    "phase": "ports",
+                    "port_done": 0,
+                    "port_total": len(online_ips),
+                    "progress": 5,
+                    "message": f"Port Scan: 0/{len(online_ips)}",
+                }
+            )
+            self._thread = threading.Thread(
+                target=self._run_bulk_port_thread, args=(online_ips,), daemon=True
+            )
+            self._thread.start()
+            return True
+
+    def _run_bulk_port_thread(self, online_ips: list[str]) -> None:
+        try:
+            self._run_bulk_ports_internal(online_ips, base_progress=5)
+        finally:
+            stopped = self._stop_event.is_set()
+            with self._lock:
+                self.state.update(
+                    {
+                        "running": False,
+                        "phase": "idle",
+                        "progress": 100 if not stopped else self.state["progress"],
+                        "message": f"Port Scan completed ({len(online_ips)} devices)",
                     }
                 )
             self.emit("scan_complete", dict(self.state))
@@ -804,13 +903,21 @@ def deep_enrich_device(ipv4: str) -> dict[str, Any] | None:
     if mac:
         dev["mac"] = mac
     dtype, extra = enrichment.classify_and_enrich(dev, deep)
+    final_vendor = vendor or extra.get("brand") or None
+    raw_ident = deep.get("identification") or ""
+    clean_ident = raw_ident if enrichment.is_useful_title(raw_ident) else ""
+    best_ident = clean_ident or (
+        f"{extra.get('brand', '')} {extra.get('model', '')}".strip()
+        if extra.get("model")
+        else (f"{extra.get('brand')} · {extra.get('category_label')}" if extra.get("brand") else None)
+    )
     updated = db.update_device_enrichment(
         ipv4=ipv4,
         device_type=dtype,
         extra=extra,
-        vendor=vendor or None,
+        vendor=final_vendor,
         mac=mac or None,
-        identification=deep.get("identification") or None,
+        identification=best_ident,
     )
     return updated
 

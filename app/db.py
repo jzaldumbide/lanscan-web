@@ -457,7 +457,17 @@ def update_device_enrichment(
         final_type = r["device_type"] if r.get("type_locked") else device_type
         new_vendor = vendor if vendor else r["vendor"]
         new_mac = mac if mac else r["mac"]
-        new_ident = identification if (identification and (not r["identification"] or len(identification) > len(r["identification"]))) else r["identification"]
+        cur_ident = r["identification"] or ""
+        cur_is_garbage = any(
+            bad in cur_ident.lower()
+            for bad in ("not found", "document error", "404", "403 forbidden", "401 unauthorized", "access error")
+        ) or cur_ident.strip().lower() in ("success", "webserver", "index", "login", "document", "error")
+        if identification:
+            new_ident = identification if (cur_is_garbage or not cur_ident or len(identification) >= len(cur_ident)) else cur_ident
+        elif cur_is_garbage:
+            new_ident = ""
+        else:
+            new_ident = cur_ident
         conn.execute(
             """
             UPDATE devices

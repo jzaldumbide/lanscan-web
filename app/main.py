@@ -219,6 +219,16 @@ def stop_scan() -> dict[str, Any]:
     return {"stopping": True}
 
 
+@app.post("/api/port-scan-all")
+def port_scan_all() -> dict[str, Any]:
+    started = scan_manager.start_bulk_port_scan()
+    if not started:
+        if scan_manager.state["running"]:
+            raise HTTPException(status_code=409, detail="Scan already in progress")
+        raise HTTPException(status_code=400, detail="No online devices to scan")
+    return {"started": True, "state": dict(scan_manager.state)}
+
+
 @app.post("/api/devices/{ipv4}/port-scan")
 async def port_scan_device(ipv4: str, payload: PortScanPayload) -> dict[str, Any]:
     dev = db.get_device(ipv4)

@@ -41,6 +41,8 @@
   const searchInput = document.getElementById("search-input");
   const subnetPills = document.getElementById("subnet-pills");
   const filterOnlineOnly = document.getElementById("filter-online-only");
+  const filterAutoPorts = document.getElementById("filter-auto-ports");
+  const btnScanAllPorts = document.getElementById("btn-scan-all-ports");
   const deviceCounter = document.getElementById("device-counter");
 
   // Details inspector refs
@@ -340,6 +342,7 @@
     tr.classList.toggle("selected", state.selectedIp === dev.ipv4);
     tr.hidden = !matchesFilters(dev);
 
+    const extra = dev.extra || {};
     const cells = tr.children;
     // 0: IPv4 <th scope="row">
     cells[0].dataset.value = String(ipv4ToInt(dev.ipv4));
@@ -347,24 +350,44 @@
     // 1: MAC
     cells[1].textContent = dev.mac || "";
     cells[1].title = dev.mac || "";
-    // 2: Hostname
+    // 2: Hostname (custom or auto-detected from mDNS / SMB / DNS)
+    const autoHost = dev.mdns_name || dev.smb_name || dev.dns_name || "";
     if (dev.custom_hostname) {
       cells[2].textContent = dev.custom_hostname;
       cells[2].classList.remove("hostname-placeholder");
+      cells[2].title = dev.custom_hostname;
+    } else if (autoHost) {
+      cells[2].textContent = autoHost;
+      cells[2].classList.add("hostname-placeholder");
+      cells[2].title = autoHost;
     } else {
       cells[2].textContent = "";
       cells[2].classList.add("hostname-placeholder");
+      cells[2].title = "";
     }
-    cells[2].title = dev.custom_hostname || "Doble clic o Edit Hostname para asignar nombre";
     // 3: Ping
     cells[3].dataset.value = String(pingSortVal);
     cells[3].innerHTML = `<span class="ping-dot ${dev.is_online ? "online" : "offline"}" title="${escapeHtml(pingTitle)}" aria-label="${escapeHtml(pingTitle)}"></span>`;
-    // 4: Vendor
-    cells[4].textContent = dev.vendor || "";
-    cells[4].title = dev.vendor || "";
-    // 5: Identification
-    cells[5].textContent = dev.identification || "";
-    cells[5].title = dev.identification || "";
+    // 4: Vendor (OUI or protocol-inferred brand)
+    const displayVendor = dev.vendor || extra.brand || "";
+    cells[4].textContent = displayVendor;
+    cells[4].title = displayVendor;
+    // 5: Identification (clean protocol/TLS/UPnP/model/category summary)
+    const rawIdent = (dev.identification || "").trim();
+    const isGarbageIdent =
+      /not found|document error|404|403 forbidden|401 unauthorized|access error/i.test(rawIdent) ||
+      ["success", "webserver", "index", "login", "error"].includes(rawIdent.toLowerCase());
+    const cleanIdent = isGarbageIdent ? "" : rawIdent;
+    const specHint = (extra.specs || []).find((s) =>
+      /tls|snmp|upnp|modelo|model|pantalla/i.test(s.label || "")
+    );
+    const displayIdent =
+      cleanIdent ||
+      (extra.model ? `${extra.brand || ""} ${extra.model}`.trim() : "") ||
+      (specHint ? `${extra.brand ? `${extra.brand} · ` : ""}${specHint.value}` : "") ||
+      (dev.device_type && dev.device_type !== "unknown" ? I18N.typeLabel(dev.device_type) : "");
+    cells[5].textContent = displayIdent;
+    cells[5].title = displayIdent;
     // 6: DNS
     cells[6].textContent = dev.dns_name || "";
     cells[6].title = dev.dns_name || "";
@@ -805,7 +828,12 @@
     btnScanLabel.textContent = state.scanning ? t("stop_scan") : t("start_scan");
     scanTargetSelect.disabled = state.scanning;
 
-    if (st.running && st.current_range) {
+    if (st.running && st.phase === "ports") {
+      scanStatusText.textContent = t("status_port_phase", {
+        done: st.port_done || 0,
+        total: st.port_total || 0,
+      });
+    } else if (st.running && st.current_range) {
       scanStatusText.textContent = t("status_scanning_range", {
         range: st.current_range.replace(" a ", " – "),
         count: st.found_count || 0,
@@ -819,6 +847,7 @@
       scanStatusText.textContent = t("status_ready");
     }
 
+    if (btnScanAllPorts) btnScanAllPorts.disabled = state.scanning;
     progressTrack.classList.toggle("visible", state.scanning);
     progressFill.style.width = `${st.progress || 0}%`;
   }
@@ -952,14 +981,30 @@
     await reloadSubnets();
   });
 
-  // Settings option
-  optAutoQuickPorts.addEventListener("change", async () => {
+  // Settings option (synced between Config dialog and main Filter Bar)
+  async function setAutoQuickPorts(enabled) {
+    optAutoQuickPorts.checked = enabled;
+    if (filterAutoPorts) filterAutoPorts.checked = enabled;
     await fetch("/api/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ auto_quick_ports: optAutoQuickPorts.checked }),
+      body: JSON.stringify({ auto_quick_ports: enabled }),
     });
-  });
+  }
+
+  optAutoQuickPorts.addEventListener("change", () => setAutoQuickPorts(optAutoQuickPorts.checked));
+  if (filterAutoPorts) {
+    filterAutoPorts.addEventListener("change", () => setAutoQuickPorts(filterAutoPorts.checked));
+  }
+  if (btnScanAllPorts) {
+    btnScanAllPorts.addEventListener("click", async () => {
+      const res = await fetch("/api/port-scan-all", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        scanStatusText.textContent = err.detail || "Unable to start port scan";
+      }
+    });
+  }
 
   // Port scan actions
   async function triggerPortScan(ip, mode, customPorts = "") {
@@ -1075,7 +1120,9 @@
     const res = await fetch("/api/bootstrap");
     const data = await res.json();
     state.subnets = data.subnets || [];
-    optAutoQuickPorts.checked = data.settings?.auto_quick_ports === "true";
+    const autoPortsOn = data.settings?.auto_quick_ports === "true";
+    optAutoQuickPorts.checked = autoPortsOn;
+    if (filterAutoPorts) filterAutoPorts.checked = autoPortsOn;
 
     // Rebuild table rows cleanly on full bootstrap
     const incomingIps = new Set((data.devices || []).map((d) => d.ipv4));

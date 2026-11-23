@@ -104,6 +104,11 @@
         <div class="subnet-pills" id="subnet-pills" role="group" aria-label="Filter by subnet"></div>
       </div>
       <div class="filter-right">
+        <label class="inline-check" title="Automatically run a quick port scan on all online devices after network discovery finishes">
+          <input type="checkbox" id="filter-auto-ports">
+          <span data-i18n="auto_port_scan">Auto Port Scan</span>
+        </label>
+        <button type="button" id="btn-scan-all-ports" class="subtle-action-btn" data-i18n="scan_all_ports">Scan All Ports</button>
         <label class="inline-check">
           <input type="checkbox" id="filter-online-only">
           <span data-i18n="online_only">Online only</span>

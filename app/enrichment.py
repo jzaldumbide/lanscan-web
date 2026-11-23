@@ -42,16 +42,37 @@ def lookup_vendor_online(mac: str) -> str:
         time.sleep(wait)
     _last_oui_api_call = time.monotonic()
 
-    url = f"https://api.maclookup.app/v2/macs/{prefix}"
-    req = urllib.request.Request(url, headers={"User-Agent": "LanScanWeb/1.1"})
+    # Provider 1: maclookup.app (JSON)
     try:
+        req = urllib.request.Request(
+            f"https://api.maclookup.app/v2/macs/{prefix}",
+            headers={"User-Agent": "LanScanWeb/1.2"},
+        )
         with urllib.request.urlopen(req, timeout=3.0) as resp:
             data = json.loads(resp.read(8192).decode("utf-8", errors="ignore"))
             company = (data.get("company") or "").strip()
-            db.set_cached_oui(prefix, company)
-            return company
+            if company:
+                db.set_cached_oui(prefix, company)
+                return company
     except Exception:
-        return ""
+        pass
+
+    # Provider 2: macvendors.com (plain text fallback)
+    try:
+        req = urllib.request.Request(
+            f"https://api.macvendors.com/{prefix}",
+            headers={"User-Agent": "LanScanWeb/1.2"},
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            company = resp.read(256).decode("utf-8", errors="ignore").strip()
+            if company and "not found" not in company.lower() and "errors" not in company.lower():
+                db.set_cached_oui(prefix, company)
+                return company
+    except Exception:
+        pass
+
+    db.set_cached_oui(prefix, "")
+    return ""
 
 
 def _http_get_info(url: str, timeout: float = 1.6) -> tuple[str, dict[str, str]]:
@@ -137,6 +158,55 @@ def probe_snmp_sysdescr(ip: str) -> str:
     finally:
         sock.close()
     return ""
+
+
+UNINFORMATIVE_TITLES = {
+    "index", "login", "document", "home", "welcome", "success", "error",
+    "not found", "404 not found", "403 forbidden", "401 unauthorized",
+    "bad request", "redirect", "moved", "object moved", "untitled",
+    "document error: not found", "access error: 404 -- not found",
+    "404", "403", "401", "500", "webserver", "web",
+}
+
+
+def is_useful_title(title: str) -> bool:
+    t = (title or "").strip().lower()
+    if not t or len(t) < 2:
+        return False
+    if t in UNINFORMATIVE_TITLES:
+        return False
+    if any(bad in t for bad in ("not found", "404", "403 forbidden", "401 unauthorized", "document error", "bad request", "access error")):
+        return False
+    return True
+
+
+def probe_upnp_unicast(ip: str) -> dict[str, str]:
+    """Direct unicast UPnP XML probing (works across NAT/Docker Desktop where multicast SSDP fails)."""
+    candidates = [
+        (7676, "/rcr/"),
+        (7676, "/smp_2_"),
+        (9197, "/dmr"),
+        (8008, "/ssdp/device-desc.xml"),
+        (8200, "/rootDesc.xml"),
+        (49152, "/description.xml"),
+        (49153, "/description.xml"),
+    ]
+    for port, path in candidates:
+        try:
+            with socket.create_connection((ip, port), timeout=0.4):
+                body, _ = _http_get_info(f"http://{ip}:{port}{path}", timeout=1.2)
+                if body and ("<device" in body.lower() or "<friendlyname" in body.lower()):
+                    m_name = re.search(r"<friendlyName>([^<]+)</friendlyName>", body, re.I)
+                    m_model = re.search(r"<modelName>([^<]+)</modelName>", body, re.I)
+                    m_manuf = re.search(r"<manufacturer>([^<]+)</manufacturer>", body, re.I)
+                    return {
+                        "friendly_name": m_name.group(1).strip() if m_name else "",
+                        "model": m_model.group(1).strip() if m_model else "",
+                        "manufacturer": m_manuf.group(1).strip() if m_manuf else "",
+                    }
+        except Exception:
+            continue
+    return {}
 
 
 def parse_samsung_model(model: str) -> dict[str, str]:
@@ -256,37 +326,51 @@ def deep_probe_device(ip: str) -> dict[str, Any]:
                 server = headers.get("server", "").strip()
                 auth_realm = headers.get("www-authenticate", "").strip()
                 title_m = re.search(r"<title[^>]*>([^<]{2,80})</title>", body, re.I)
-                title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else ""
-                if title.lower() in ("index", "login", "document", "home", "404 not found", "403 forbidden", "redirect"):
-                    title = ""
+                raw_title = re.sub(r"\s+", " ", title_m.group(1)).strip() if title_m else ""
+                title = raw_title if is_useful_title(raw_title) else ""
                 if port == 8096 and ("jellyfin" in body.lower() or "kestrel" in server.lower()):
                     out["links"].append({"label": "Jellyfin (:8096)", "url": f"http://{ip}:8096"})
                 else:
-                    label = f"Interfaz Web ({scheme.upper()} :{port})"
+                    label = f"Web UI ({scheme.upper()} :{port})"
                     if not any(l["url"] == f"{scheme}://{ip}:{port}" for l in out["links"]):
                         out["links"].append({"label": label, "url": f"{scheme}://{ip}:{port}"})
-                if title and not any(s["label"] == "Título Web" for s in out["specs"]):
-                    out["specs"].append({"label": "Título Web", "value": title})
-                if server and not any(s["label"] == "Servidor HTTP" for s in out["specs"]):
-                    out["specs"].append({"label": "Servidor HTTP", "value": server})
+                if title and not any(s["label"] == "Web Title" for s in out["specs"]):
+                    out["specs"].append({"label": "Web Title", "value": title})
+                if server and server.lower() not in ("webserver", "http") and not any(s["label"] == "HTTP Server" for s in out["specs"]):
+                    out["specs"].append({"label": "HTTP Server", "value": server})
                 if auth_realm:
                     rm = re.search(r'realm="([^"]+)"', auth_realm, re.I)
                     if rm:
-                        out["specs"].append({"label": "Realm Auth", "value": rm.group(1)})
+                        out["specs"].append({"label": "Auth Realm", "value": rm.group(1)})
                 if not out["identification"]:
                     if title:
                         out["identification"] = title
-                    elif server:
+                    elif server and server.lower() not in ("webserver", "http"):
                         out["identification"] = server
         except Exception:
             continue
 
-    # 4. TLS certificate hint
+    # 4. Unicast UPnP XML (extracts exact model/manufacturer even behind Docker NAT)
+    upnp = probe_upnp_unicast(ip)
+    if upnp:
+        if upnp.get("model") and not out["model"]:
+            out["model"] = upnp["model"]
+        if upnp.get("manufacturer"):
+            out["specs"].append({"label": "UPnP Manufacturer", "value": upnp["manufacturer"]})
+        if upnp.get("friendly_name"):
+            out["specs"].append({"label": "UPnP Name", "value": upnp["friendly_name"]})
+        if not out["identification"]:
+            parts = [upnp.get("manufacturer", ""), upnp.get("model", ""), upnp.get("friendly_name", "")]
+            out["identification"] = " · ".join(p for p in parts if p)[:80]
+
+    # 5. TLS certificate hint (crucial for Ezviz, Hikvision, routers, printers)
     cert = probe_tls_cert(ip)
     if cert.get("hint"):
-        out["specs"].append({"label": f"Certificado TLS (:{cert['port']})", "value": cert["hint"]})
+        out["specs"].append({"label": f"TLS Cert (:{cert['port']})", "value": cert["hint"]})
+        if not out["identification"]:
+            out["identification"] = cert["hint"]
 
-    # 5. SNMP sysDescr (great for Epson printers, routers, NAS)
+    # 6. SNMP sysDescr (great for Epson printers, routers, NAS)
     sysdescr = probe_snmp_sysdescr(ip)
     if sysdescr:
         out["specs"].append({"label": "SNMP sysDescr", "value": sysdescr})
@@ -442,14 +526,23 @@ def classify_and_enrich(
     deep = deep_data or {}
     ip = device.get("ipv4", "")
     vendor = (device.get("vendor") or "").strip()
-    ident = (deep.get("identification") or device.get("identification") or "").strip()
+    raw_ident = (deep.get("identification") or device.get("identification") or "").strip()
+    ident = raw_ident if is_useful_title(raw_ident) else ""
     hostname = (device.get("custom_hostname") or "").strip()
     smb_name = (device.get("smb_name") or "").strip()
     mdns = (device.get("mdns_name") or "").strip()
     ports = device.get("ports") or []
     port_nums = {int(p["port"]) for p in ports if "port" in p}
+    port_products = " ".join(
+        f"{p.get('service','')} {p.get('product','')} {p.get('extrainfo','')}"
+        for p in ports
+    )
+    deep_spec_text = " ".join(
+        f"{s.get('label','')} {s.get('value','')}"
+        for s in (deep.get("specs") or [])
+    )
 
-    combined = " ".join([vendor, ident, hostname, smb_name, mdns]).lower()
+    combined = " ".join([vendor, ident, hostname, smb_name, mdns, port_products, deep_spec_text]).lower()
 
     device_type = deep.get("protocol_type_hint") or "unknown"
     brand = ""
