@@ -23,7 +23,7 @@ jobs:
       matrix:
         include:
           - label: macOS Apple Silicon (arm64)
-            os: macos-14
+            os: macos-15
             artifact_glob: dist/LanScan-Web-macOS-*.dmg
           - label: macOS Intel (x64 / iMac)
             os: macos-15-intel
