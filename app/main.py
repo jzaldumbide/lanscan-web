@@ -156,8 +156,8 @@ def get_topology() -> dict[str, Any]:
 
 
 @app.get("/api/recommendations")
-def get_recommendations() -> dict[str, Any]:
-    return advisor.analyze_network(db.list_subnets(), db.list_devices())
+def get_recommendations(lang: str = Query(default="en")) -> dict[str, Any]:
+    return advisor.analyze_network(db.list_subnets(), db.list_devices(), lang=lang)
 
 
 @app.post("/api/devices/{ipv4}/enrich")

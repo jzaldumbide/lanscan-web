@@ -34,7 +34,8 @@ Aplicación web self-hosted inspirada en **LanScan**, diseñada para descubrir, 
 - **Escáner de Puertos TCP (`nmap` en 2 etapas):**
   - Modos **Rápido** (puertos comunes + NAS/TV/Docker), **Top 1000**, **Completo (`1-65535`)** y **Personalizado**.
   - Detección de servicio/versión, enlaces rápidos `Abrir` para paneles HTTP/HTTPS y alertas de seguridad (FTP, Telnet, RTSP, etc.).
-- **UI moderna y accesible:**
+- **UI moderna, accesible y bilingüe (`EN | ES`):**
+  - Selector instantáneo **Inglés (predeterminado) / Español (`EN | ES`)** en la barra superior y en Config, incluyendo recomendaciones de auditoría en ambos idiomas.
   - Tema **Claro / Oscuro / Sistema** automático (`light-dark()`), diseño responsivo y exportación a **CSV** (excluyendo contraseñas).
 
 ---

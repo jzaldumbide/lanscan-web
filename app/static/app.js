@@ -1,6 +1,9 @@
 (() => {
   "use strict";
 
+  const I18N = window.LANSCAN_I18N;
+  const t = (key, vars) => I18N.t(key, vars);
+
   const state = {
     subnets: [],
     devices: new Map(), // ipv4 -> device object
@@ -10,6 +13,7 @@
     onlineOnly: false,
     searchQuery: "",
     scanning: false,
+    lastScanState: {},
     portScanningIps: new Set(),
     sortCol: 0,
     sortType: "number",
@@ -147,9 +151,9 @@
     if (colorSchemeMeta) {
       colorSchemeMeta.content = currentMode === "system" ? "light dark" : currentMode;
     }
-    const osNow = osDarkQuery.matches ? "oscuro" : "claro";
+    const osNow = osDarkQuery.matches ? t("theme_mode_dark") : t("theme_mode_light");
     if (themeSystemLabel) {
-      themeSystemLabel.textContent = `Sistema (actualmente ${osNow})`;
+      themeSystemLabel.textContent = t("theme_system", { mode: osNow });
     }
     document.querySelectorAll('input[name="theme-mode"]').forEach((radio) => {
       radio.checked = radio.value === currentMode;
@@ -171,9 +175,59 @@
 
   window.addEventListener("storage", (e) => {
     if (e.key === "color-scheme") updateThemeControls();
+    if (e.key === "lanscan-lang") applyLanguage(e.newValue || "en");
   });
   osDarkQuery.addEventListener("change", updateThemeControls);
   updateThemeControls();
+
+  // Bilingual UI (EN default | ES option)
+  function applyLanguage(lang) {
+    const active = I18N.setLang(lang);
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      el.textContent = t(el.dataset.i18n);
+    });
+    document.querySelectorAll("[data-i18n-html]").forEach((el) => {
+      el.innerHTML = t(el.dataset.i18nHtml);
+    });
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+      el.placeholder = t(el.dataset.i18nPlaceholder);
+    });
+    document.querySelectorAll(".lang-btn[data-set-lang]").forEach((btn) => {
+      btn.setAttribute("aria-pressed", String(btn.dataset.setLang === active));
+    });
+    document.querySelectorAll('input[name="ui-lang"]').forEach((radio) => {
+      radio.checked = radio.value === active;
+    });
+
+    // Update category <select> options in Edit Device modal
+    const typeSelect = document.getElementById("edit-type-input");
+    if (typeSelect) {
+      [...typeSelect.options].forEach((opt) => {
+        opt.textContent = I18N.typeLabel(opt.value);
+      });
+    }
+
+    // Update responsive stacked table CSS labels
+    const lbls = I18N.tableLabels();
+    for (let i = 1; i < lbls.length; i++) {
+      table.style.setProperty(`--label-${i + 1}`, `"${lbls[i]}"`);
+    }
+
+    updateThemeControls();
+    renderSubnetsUI();
+    updateCountersAndEmpty();
+    updateScanStatusUI(state.lastScanState || {});
+    renderDetails(state.selectedIp ? state.devices.get(state.selectedIp) : null);
+    if (state.activeView === "diagram") renderTopologyDiagram(false);
+    if (state.activeView === "audit") renderAuditPanel();
+  }
+
+  document.querySelectorAll(".lang-btn[data-set-lang]").forEach((btn) => {
+    btn.addEventListener("click", () => applyLanguage(btn.dataset.setLang));
+  });
+  document.querySelectorAll('input[name="ui-lang"]').forEach((radio) => {
+    radio.addEventListener("change", () => applyLanguage(radio.value));
+  });
 
   // Sortable table (follows sortable-table guidance: moves existing <tr> nodes)
   function reorderRows(orderedRows) {
@@ -210,8 +264,12 @@
     reorderRows(rows);
     if (announce && sortStatus) {
       const th = table.tHead.rows[0].cells[idx];
-      const label = th ? th.textContent.trim() : "columna";
-      sortStatus.textContent = `Ordenado por ${label}, ${state.sortDir === "ascending" ? "ascendente" : "descendente"}, ${rows.length} filas`;
+      const label = th ? th.textContent.trim() : "column";
+      sortStatus.textContent = t("sorted_announce", {
+        col: label,
+        dir: state.sortDir === "ascending" ? t("ascending") : t("descending"),
+        n: rows.length,
+      });
     }
   }
 
@@ -391,7 +449,7 @@
         if (dev.is_online) online++;
       }
     }
-    deviceCounter.textContent = `${online} activos / ${visible} mostrados`;
+    deviceCounter.textContent = t("counter_fmt", { online, visible });
     emptyState.hidden = visible > 0;
     renderSubnetPills();
   }
@@ -438,14 +496,14 @@
       ].forEach((id) => {
         const el = document.getElementById(id);
         if (el) {
-          el.textContent = "No Selection";
+          el.textContent = t("no_selection");
           el.classList.add("muted");
         }
       });
       portScanMode.disabled = true;
       btnPortScan.disabled = true;
       detPortStatus.textContent = "";
-      detPortsList.innerHTML = `<span class="muted">No Selection</span>`;
+      detPortsList.innerHTML = `<span class="muted">${escapeHtml(t("no_selection"))}</span>`;
       detComments.value = "";
       detComments.disabled = true;
       return;
@@ -455,7 +513,7 @@
     if (btnEnrichDevice) {
       const busy = state.enrichingIps && state.enrichingIps.has(dev.ipv4);
       btnEnrichDevice.disabled = Boolean(busy);
-      btnEnrichDevice.textContent = busy ? "Analizando…" : "Enriquecer info";
+      btnEnrichDevice.textContent = busy ? t("enriching") : t("btn_enrich_device");
     }
 
     // Render enriched profile card
@@ -463,11 +521,12 @@
     if (profileCard) {
       profileCard.hidden = false;
       document.getElementById("det-type-icon").innerHTML = deviceIconSvg(dev.device_type || "unknown", 18);
-      document.getElementById("det-category").textContent = extra.category_label || "Dispositivo de Red";
+      document.getElementById("det-category").textContent = I18N.typeLabel(dev.device_type || "unknown");
       const brandParts = [extra.brand || dev.vendor, extra.model].filter(Boolean);
-      document.getElementById("det-brand-model").textContent = brandParts.join(" · ") || "Sin marca identificada";
+      document.getElementById("det-brand-model").textContent = brandParts.join(" · ") || t("no_brand_yet");
       document.getElementById("det-summary").textContent =
-        extra.summary || "Pulsa «Enriquecer info» para consultar protocolos, certificado TLS, SNMP y base de marcas.";
+        (I18N.getLang() === "es" ? extra.summary : "") ||
+        (extra.brand ? `${I18N.typeLabel(dev.device_type || "unknown")} · ${extra.brand}${extra.model ? ` ${extra.model}` : ""}` : t("default_profile_summary"));
 
       const specsEl = document.getElementById("det-extra-specs");
       const specs = (extra.specs || []).filter((s) => s.label !== "Marca" && s.label !== "Categoría");
@@ -509,29 +568,29 @@
       } else {
         accessCard.hidden = false;
         const accessTitle = document.getElementById("det-access-title");
-        accessTitle.textContent = isRouter ? "Acceso del Router / Password" : "Credenciales guardadas";
+        accessTitle.textContent = isRouter ? t("access_title_router") : t("access_title_saved");
         const bodyEl = document.getElementById("det-access-body");
         const parts = [];
 
         const adminUrl = dev.admin_url || (isRouter ? `http://${dev.ipv4}` : "");
         if (adminUrl) {
           parts.push(
-            `<div class="cred-row"><span class="spec-label">Panel:</span><a class="subtle-link mono" href="${escapeHtml(adminUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(adminUrl)} ↗</a></div>`
+            `<div class="cred-row"><span class="spec-label">${escapeHtml(t("cred_panel"))}</span><a class="subtle-link mono" href="${escapeHtml(adminUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(adminUrl)} ↗</a></div>`
           );
         }
         if (dev.admin_user) {
           parts.push(
-            `<div class="cred-row"><span class="spec-label">Usuario:</span><span class="mono">${escapeHtml(dev.admin_user)}</span></div>`
+            `<div class="cred-row"><span class="spec-label">${escapeHtml(t("cred_user"))}</span><span class="mono">${escapeHtml(dev.admin_user)}</span></div>`
           );
         }
         if (dev.admin_password) {
           parts.push(`
             <div class="cred-row">
-              <span class="spec-label">Password:</span>
+              <span class="spec-label">${escapeHtml(t("cred_pass"))}</span>
               <span class="cred-actions">
                 <span id="det-pass-val" class="mono" data-revealed="0">••••••••</span>
-                <button type="button" id="btn-det-pass-toggle" class="subtle-action-btn" aria-pressed="false">Ver</button>
-                <button type="button" id="btn-det-pass-copy" class="subtle-action-btn">Copiar</button>
+                <button type="button" id="btn-det-pass-toggle" class="subtle-action-btn" aria-pressed="false">${escapeHtml(t("btn_show"))}</button>
+                <button type="button" id="btn-det-pass-copy" class="subtle-action-btn">${escapeHtml(t("btn_copy"))}</button>
               </span>
             </div>
           `);
@@ -540,10 +599,10 @@
         if (isRouter && !dev.admin_password && defCreds) {
           parts.push(`
             <div class="default-creds-box">
-              <strong>Referencia de fábrica (si nunca se cambió):</strong>
-              <div><span class="spec-label">Usuario:</span> <span class="mono">${escapeHtml(defCreds.user)}</span></div>
-              <div><span class="spec-label">Password:</span> <span class="mono">${escapeHtml(defCreds.password)}</span></div>
-              <div class="default-creds-note">${escapeHtml(defCreds.note)} La clave real no se puede leer por red; pulsa <strong>Editar</strong> para guardar tu contraseña en este SQLite local.</div>
+              <strong>${escapeHtml(t("factory_ref_title"))}</strong>
+              <div><span class="spec-label">${escapeHtml(t("cred_user"))}</span> <span class="mono">${escapeHtml(defCreds.user)}</span></div>
+              <div><span class="spec-label">${escapeHtml(t("cred_pass"))}</span> <span class="mono">${escapeHtml(defCreds.password)}</span></div>
+              <div class="default-creds-note">${escapeHtml(t("factory_ref_disclaimer"))}</div>
             </div>
           `);
         }
@@ -558,7 +617,7 @@
             const revealed = passValEl.dataset.revealed === "1";
             passValEl.dataset.revealed = revealed ? "0" : "1";
             passValEl.textContent = revealed ? "••••••••" : dev.admin_password;
-            toggleBtn.textContent = revealed ? "Ver" : "Ocultar";
+            toggleBtn.textContent = revealed ? t("btn_show") : t("btn_hide");
             toggleBtn.setAttribute("aria-pressed", String(!revealed));
           });
         }
@@ -566,9 +625,9 @@
           copyBtn.addEventListener("click", async () => {
             try {
               await navigator.clipboard.writeText(dev.admin_password);
-              copyBtn.textContent = "Copiado";
+              copyBtn.textContent = t("btn_copied");
               setTimeout(() => {
-                copyBtn.textContent = "Copiar";
+                copyBtn.textContent = t("btn_copy");
               }, 1400);
             } catch {}
           });
@@ -599,28 +658,28 @@
     const isPortScanning = state.portScanningIps.has(dev.ipv4);
     portScanMode.disabled = isPortScanning;
     btnPortScan.disabled = isPortScanning;
-    btnPortScan.textContent = isPortScanning ? "Escaneando…" : "Escanear";
+    btnPortScan.textContent = isPortScanning ? t("scanning_short") : t("btn_scan_ports");
     detPortStatus.textContent = isPortScanning
-      ? "Ejecutando nmap…"
+      ? t("running_nmap")
       : dev.last_port_scan
-      ? `Actualizado ${formatRelativeTime(dev.last_port_scan)}`
+      ? t("updated_at", { t: formatRelativeTime(dev.last_port_scan) })
       : "";
 
     const ports = dev.ports || [];
     if (ports.length === 0) {
-      detPortsList.innerHTML = `<span class="muted">${dev.last_port_scan ? "Sin puertos TCP abiertos detectados" : 'Sin escanear — pulsa "Escanear" arriba'}</span>`;
+      detPortsList.innerHTML = `<span class="muted">${escapeHtml(dev.last_port_scan ? t("no_open_ports") : t("not_scanned_ports"))}</span>`;
     } else {
       detPortsList.innerHTML = ports
         .map((p) => {
           const ver = [p.product, p.version, p.extrainfo].filter(Boolean).join(" ");
           const link = p.web_url
-            ? `<a class="port-open-link" href="${escapeHtml(p.web_url)}" target="_blank" rel="noopener noreferrer">Abrir</a>`
+            ? `<a class="port-open-link" href="${escapeHtml(p.web_url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t("open_link"))}</a>`
             : "";
           return `
             <div class="port-item">
               <div class="port-item-main">
                 <span class="port-num">${p.port}/${escapeHtml(p.protocol)}</span>
-                <span class="port-svc">${escapeHtml(p.service || "desconocido")}</span>
+                <span class="port-svc">${escapeHtml(p.service || t("unknown_service"))}</span>
                 ${ver ? `<span class="port-ver" title="${escapeHtml(ver)}">${escapeHtml(ver)}</span>` : ""}
               </div>
               ${link}
@@ -639,7 +698,7 @@
   function renderSubnetsUI() {
     const prevVal = scanTargetSelect.value || "all";
     scanTargetSelect.innerHTML =
-      `<option value="all">Todas las redes (${state.subnets.filter((s) => s.enabled).length})</option>` +
+      `<option value="all">${escapeHtml(t("all_networks_opt", { n: state.subnets.filter((s) => s.enabled).length }))}</option>` +
       state.subnets
         .map(
           (s) =>
@@ -661,7 +720,7 @@
     }
 
     const pills = [
-      `<button type="button" class="pill-btn" data-cidr="all" aria-pressed="${state.activeSubnetFilter === "all"}">Todas (${state.devices.size})</button>`,
+      `<button type="button" class="pill-btn" data-cidr="all" aria-pressed="${state.activeSubnetFilter === "all"}">${escapeHtml(t("all_networks_pill", { n: state.devices.size }))}</button>`,
       ...state.subnets.map((s) => {
         const cnt = counts.get(s.cidr) || 0;
         const pressed = state.activeSubnetFilter === s.cidr;
@@ -682,7 +741,7 @@
 
   function renderSubnetsConfigList() {
     if (state.subnets.length === 0) {
-      subnetsConfigList.innerHTML = `<p class="muted">No hay subredes configuradas todavía.</p>`;
+      subnetsConfigList.innerHTML = `<p class="muted">${escapeHtml(t("cfg_no_subnets"))}</p>`;
       return;
     }
     subnetsConfigList.innerHTML = state.subnets
@@ -690,14 +749,14 @@
         (s) => `
         <div class="subnet-row">
           <div class="subnet-row-left">
-            <input type="checkbox" data-toggle-subnet="${s.id}" ${s.enabled ? "checked" : ""} aria-label="Activar ${escapeHtml(s.name)}">
+            <input type="checkbox" data-toggle-subnet="${s.id}" ${s.enabled ? "checked" : ""} aria-label="${escapeHtml(s.name)}">
             <span class="pill-dot" style="background:${escapeHtml(s.color)}"></span>
             <div>
               <strong>${escapeHtml(s.name)}</strong>
               <div class="subnet-cidr-code">${escapeHtml(s.cidr)} (${escapeHtml(s.start_ip)} – ${escapeHtml(s.end_ip)})</div>
             </div>
           </div>
-          <button type="button" class="secondary-btn" data-delete-subnet="${s.id}">Eliminar</button>
+          <button type="button" class="secondary-btn" data-delete-subnet="${s.id}">${escapeHtml(t("btn_delete"))}</button>
         </div>`
       )
       .join("");
@@ -738,17 +797,26 @@
 
   // Scan controls
   function updateScanStatusUI(st) {
+    state.lastScanState = st || {};
     state.scanning = Boolean(st.running);
     btnScan.classList.toggle("scanning", state.scanning);
     iconPlay.hidden = state.scanning;
     iconStop.hidden = !state.scanning;
-    btnScanLabel.textContent = state.scanning ? "Stop Scan" : "Start LanScan";
+    btnScanLabel.textContent = state.scanning ? t("stop_scan") : t("start_scan");
     scanTargetSelect.disabled = state.scanning;
 
     if (st.running && st.current_range) {
-      scanStatusText.textContent = `Scan from ${st.current_range} · ${st.message}`;
-    } else if (st.message) {
-      scanStatusText.textContent = st.message;
+      scanStatusText.textContent = t("status_scanning_range", {
+        range: st.current_range.replace(" a ", " – "),
+        count: st.found_count || 0,
+      });
+    } else if (st.completed_subnets > 0) {
+      scanStatusText.textContent = t("status_scan_done", {
+        count: st.found_count || 0,
+        subnets: st.total_subnets || st.completed_subnets,
+      });
+    } else {
+      scanStatusText.textContent = t("status_ready");
     }
 
     progressTrack.classList.toggle("visible", state.scanning);
@@ -790,9 +858,9 @@
     btnToggleEditPass.addEventListener("click", () => {
       const showing = editAdminPassInput.type === "text";
       editAdminPassInput.type = showing ? "password" : "text";
-      btnToggleEditPass.textContent = showing ? "Ver" : "Ocultar";
+      btnToggleEditPass.textContent = showing ? t("btn_show") : t("btn_hide");
       btnToggleEditPass.setAttribute("aria-pressed", String(!showing));
-      btnToggleEditPass.setAttribute("aria-label", showing ? "Mostrar contraseña" : "Ocultar contraseña");
+      btnToggleEditPass.setAttribute("aria-label", showing ? t("btn_show") : t("btn_hide"));
     });
   }
 
@@ -813,7 +881,7 @@
       editAdminPassInput.type = "password";
     }
     if (btnToggleEditPass) {
-      btnToggleEditPass.textContent = "Ver";
+      btnToggleEditPass.textContent = t("btn_show");
       btnToggleEditPass.setAttribute("aria-pressed", "false");
     }
     if (editCommentsInput) editCommentsInput.value = dev.comments || "";
@@ -949,9 +1017,9 @@
     if (res.ok) {
       const dev = await res.json();
       state.devices.set(ip, dev);
-      commentsSaved.textContent = "Guardado";
+      commentsSaved.textContent = t("comments_saved");
       setTimeout(() => {
-        if (commentsSaved.textContent === "Guardado") commentsSaved.textContent = "";
+        if (commentsSaved.textContent === t("comments_saved")) commentsSaved.textContent = "";
       }, 1500);
     }
   }
@@ -1255,18 +1323,18 @@
   if (btnEnrichAll) {
     btnEnrichAll.addEventListener("click", async () => {
       btnEnrichAll.disabled = true;
-      btnEnrichAllLabel.textContent = "Analizando…";
-      scanStatusText.textContent = "Cargando información de marcas, protocolos, TLS y SNMP…";
+      btnEnrichAllLabel.textContent = t("enriching");
+      scanStatusText.textContent = t("status_enriching_all");
       try {
         const res = await fetch("/api/enrich-all", { method: "POST" });
         if (res.ok) {
           const data = await res.json();
-          scanStatusText.textContent = `Información enriquecida para ${data.enriched} equipo(s)`;
+          scanStatusText.textContent = t("status_enriched_all", { n: data.enriched });
           await loadBootstrap();
         }
       } finally {
         btnEnrichAll.disabled = false;
-        btnEnrichAllLabel.textContent = "Enriquecer";
+        btnEnrichAllLabel.textContent = t("enrich");
       }
     });
   }
@@ -1388,7 +1456,7 @@
     );
 
     if (subnets.length === 0) {
-      topoSvg.innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="var(--fg-muted)" font-size="14">No hay subredes configuradas para mostrar.</text>`;
+      topoSvg.innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="var(--fg-muted)" font-size="14">${escapeHtml(t("diagram_no_subnets"))}</text>`;
       return;
     }
 
@@ -1461,14 +1529,14 @@
           <rect class="topo-zone" x="${x}" y="${y}" width="${zoneW}" height="${zoneH}" rx="16" stroke="${escapeHtml(color)}"/>
           <circle cx="${x + 18}" cy="${y + 23}" r="5.5" fill="${escapeHtml(color)}"/>
           <text class="topo-zone-title" x="${x + 31}" y="${y + 27}">${escapeHtml(sub.name)}</text>
-          <text class="topo-zone-sub" x="${x + zoneW - 16}" y="${y + 27}" text-anchor="end">${escapeHtml(sub.cidr)} · ${sub.online_count}/${sub.total_count} activos</text>
+          <text class="topo-zone-sub" x="${x + zoneW - 16}" y="${y + 27}" text-anchor="end">${escapeHtml(sub.cidr)} · ${escapeHtml(t("diagram_active_ratio", { on: sub.online_count, tot: sub.total_count }))}</text>
         </g>
       `);
 
       // Render Gateway node with detailed router illustration
       if (gw) {
-        const gwTitle = truncate(gw.custom_hostname || gw.identification || gw.vendor || "Router / Gateway", 21);
-        const gwSub = gw.vendor ? truncate(gw.vendor, 22) : "Puerta de enlace";
+        const gwTitle = truncate(gw.custom_hostname || gw.identification || gw.vendor || I18N.typeLabel("router"), 21);
+        const gwSub = gw.vendor ? truncate(gw.vendor, 22) : t("diagram_gateway_sub");
         const portsN = (gw.ports || []).length;
         const selectedCls = state.selectedIp === gw.ipv4 ? " selected" : "";
         nodesSvg.push(`
@@ -1497,7 +1565,7 @@
 
       if (filteredDevs.length === 0) {
         nodesSvg.push(
-          `<text class="topo-node-meta" x="${x + zoneW / 2}" y="${gridTopY + 18}" text-anchor="middle">Sin equipos que coincidan con los filtros</text>`
+          `<text class="topo-node-meta" x="${x + zoneW / 2}" y="${gridTopY + 18}" text-anchor="middle">${escapeHtml(t("diagram_no_matches"))}</text>`
         );
       }
 
@@ -1522,7 +1590,7 @@
           17
         );
         const secondaryLabel = truncate(
-          dev.location || extra.category_label || dev.vendor || "Equipo de red",
+          dev.location || I18N.typeLabel(dtype) || dev.vendor,
           19
         );
         const portsN = (dev.ports || []).length;
@@ -1563,7 +1631,7 @@
         const lx = (wanPos.cx + gwPos.cx) / 2;
         const ly = ctrlY + 10;
         edgesSvg.push(
-          `<text class="topo-zone-sub" x="${lx}" y="${ly}" text-anchor="middle">Cascada WAN (${escapeHtml(casc.wan_ip)} → ${escapeHtml(sub.gateway?.ipv4 || "")})</text>`
+          `<text class="topo-zone-sub" x="${lx}" y="${ly}" text-anchor="middle">${escapeHtml(t("diagram_cascade_label", { wan: casc.wan_ip, gw: sub.gateway?.ipv4 || "" }))}</text>`
         );
       } else {
         const midY = (internetBy + gwPos.topY) / 2;
@@ -1578,8 +1646,8 @@
       <g class="topo-node" transform="translate(${internetX}, ${TOP_INTERNET_Y})">
         <rect class="topo-node-bg" width="${internetW}" height="${internetH}" rx="34" stroke="var(--accent)"/>
         <g transform="translate(14, 10)">${DEVICE_DRAWINGS.internet}</g>
-        <text class="topo-node-title" x="72" y="30">Internet / WAN</text>
-        <text class="topo-node-meta" x="72" y="48">${subnets.length} red(es) configuradas</text>
+        <text class="topo-node-title" x="72" y="30">${escapeHtml(t("diagram_internet"))}</text>
+        <text class="topo-node-meta" x="72" y="48">${escapeHtml(t("diagram_networks_count", { n: subnets.length }))}</text>
       </g>
     `;
 
@@ -1640,20 +1708,6 @@
     return "#ef4444";
   }
 
-  const SEV_LABELS = {
-    critical: "Crítica",
-    warning: "Advertencia",
-    info: "Sugerencia",
-    good: "Óptimo",
-  };
-
-  const CAT_LABELS = {
-    topology: "Topología",
-    security: "Seguridad",
-    performance: "Rendimiento",
-    organization: "Organización",
-  };
-
   function paintAuditFindings() {
     if (!state.lastAudit || !auditFindingsEl) return;
     const all = state.lastAudit.findings || [];
@@ -1663,7 +1717,7 @@
         : all.filter((f) => f.category === state.auditCategory);
 
     if (filtered.length === 0) {
-      auditFindingsEl.innerHTML = `<p class="muted">Sin hallazgos en esta categoría.</p>`;
+      auditFindingsEl.innerHTML = `<p class="muted">${escapeHtml(t("audit_empty_cat"))}</p>`;
       return;
     }
 
@@ -1671,7 +1725,7 @@
       .map((f) => {
         const ipsHtml = (f.affected_ips || []).length
           ? `<div class="finding-ips">
-              <span class="spec-label">Equipos:</span>
+              <span class="spec-label">${escapeHtml(t("audit_affected_devices"))}</span>
               ${f.affected_ips
                 .map((ip) => {
                   const dev = state.devices.get(ip);
@@ -1685,13 +1739,13 @@
           <article class="finding-card sev-${escapeHtml(f.severity)}">
             <div class="finding-head">
               <div class="finding-title-wrap">
-                <span class="sev-badge ${escapeHtml(f.severity)}">${escapeHtml(SEV_LABELS[f.severity] || f.severity)}</span>
+                <span class="sev-badge ${escapeHtml(f.severity)}">${escapeHtml(t(`sev_${f.severity}`))}</span>
                 <h3 class="finding-title">${escapeHtml(f.title)}</h3>
               </div>
-              <span class="cat-tag">${escapeHtml(CAT_LABELS[f.category] || f.category)}</span>
+              <span class="cat-tag">${escapeHtml(t(`cat_${f.category}`))}</span>
             </div>
             <p class="finding-desc">${escapeHtml(f.description)}</p>
-            <div class="finding-rec"><strong>Recomendación:</strong> ${escapeHtml(f.recommendation)}</div>
+            <div class="finding-rec"><strong>${escapeHtml(t("audit_recommendation_prefix"))}</strong> ${escapeHtml(f.recommendation)}</div>
             ${ipsHtml}
           </article>
         `;
@@ -1716,7 +1770,7 @@
   async function renderAuditPanel() {
     let data;
     try {
-      const res = await fetch("/api/recommendations");
+      const res = await fetch(`/api/recommendations?lang=${encodeURIComponent(I18N.getLang())}`);
       data = await res.json();
     } catch {
       return;
@@ -1733,22 +1787,23 @@
 
     const sum = data.summary || {};
     if (auditSubtitle) {
-      auditSubtitle.textContent = `${sum.total_devices || 0} equipos en ${sum.active_subnets || 0} subred(es) · ${sum.critical || 0} crítica(s) · ${sum.warning || 0} advertencia(s) · ${sum.info || 0} sugerencia(s)`;
+      auditSubtitle.textContent = t("audit_summary_fmt", {
+        tot: sum.total_devices || 0,
+        subs: sum.active_subnets || 0,
+        crit: sum.critical || 0,
+        warn: sum.warning || 0,
+        info: sum.info || 0,
+      });
     }
 
     if (auditSubscores) {
       const sc = data.scores || {};
-      auditSubscores.innerHTML = [
-        ["topology", "Topología"],
-        ["security", "Seguridad"],
-        ["performance", "Rendimiento"],
-        ["organization", "Organización"],
-      ]
-        .map(([key, label]) => {
+      auditSubscores.innerHTML = ["topology", "security", "performance", "organization"]
+        .map((key) => {
           const v = Number(sc[key] || 0);
           return `
             <div class="subscore-item">
-              <div class="subscore-top"><span>${label}</span><span>${v}/100</span></div>
+              <div class="subscore-top"><span>${escapeHtml(t(`cat_${key}`))}</span><span>${v}/100</span></div>
               <div class="subscore-bar"><div class="subscore-fill" style="width:${v}%;background:${scoreColor(v)}"></div></div>
             </div>
           `;
@@ -1791,5 +1846,6 @@
     });
   }
 
+  applyLanguage(I18N.getLang());
   loadBootstrap().then(connectEvents);
 })();

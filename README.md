@@ -34,7 +34,8 @@ A self-hosted web application inspired by **LanScan**, built to discover, invent
 - **Two-Stage TCP Port Scanner (`nmap`):**
   - **Quick** (common + NAS/TV/Docker ports), **Top 1000**, **Full (`1–65535`)**, and **Custom** port ranges.
   - Service/version detection, clickable `Open` links for HTTP/HTTPS web interfaces, and basic security alerts (FTP, Telnet, RTSP, etc.).
-- **Modern Accessible UI:**
+- **Modern Bilingual Accessible UI (`EN | ES`):**
+  - Native **English (default)** and **Spanish** interface switcher (`EN | ES`) in the toolbar and Config dialog, including localized audit recommendations.
   - Automatic **Light / Dark / System** theme (`light-dark()`), responsive layout, and **CSV export** (excluding passwords).
 
 ---

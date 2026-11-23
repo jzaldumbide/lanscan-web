@@ -1809,3 +1809,33 @@ textarea:user-invalid {
   background: var(--bg-toolbar);
   font-weight: 600;
 }
+
+/* EN / ES Language Switcher */
+.lang-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+.lang-btn {
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.lang-btn:hover {
+  color: var(--fg-primary);
+}
+
+.lang-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: #ffffff;
+}
